@@ -1,0 +1,49 @@
+[package]
+name = "obsigil"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.83.0"
+license = "MIT OR Apache-2.0"
+description = "Mandate-token format: a JWT-like token split into a public manifest and an encrypted mandate (AES-SIV / AES-GCM-SIV), on RustCrypto"
+repository = "https://gitlab.com/obsigil/obsigil-rs"
+documentation = "https://docs.rs/obsigil"
+keywords = ["token", "jwt", "mandate", "aead", "authorization"]
+categories = ["cryptography", "authentication"]
+
+[features]
+default = ["json"]
+# Serializations (spec §7). JSON is the mandatory-to-implement default.
+json = ["dep:serde_json"]
+toml = ["dep:toml"]
+cbor = ["dep:ciborium"]
+# Algorithm code 1 (AES-GCM-SIV, spec §5) is OPTIONAL; code 0 (AES-SIV) is
+# always compiled. Only authenticated AEADs are ever built in, so an
+# unauthenticated mandate is structurally unrepresentable (spec §9.2).
+gcm-siv = ["dep:aes-gcm-siv", "dep:hkdf", "dep:sha2"]
+# Byte-level low-level surface for test-vector generation and
+# cross-implementation conformance (spec §10). Not part of the everyday
+# API; enabled by obsigil-cli and conformance runners.
+conformance = []
+
+[dependencies]
+aes-siv = "0.7.0"
+serde = { version = "1", features = ["derive"] }
+uuid = { version = "1", features = ["v7", "serde"] }
+zeroize = { version = "1", features = ["derive"] }
+subtle = "2"
+getrandom = "0.2"
+data-encoding = "2"
+
+serde_json = { version = "1", optional = true }
+toml = { version = "0.8", optional = true }
+ciborium = { version = "0.2", optional = true }
+aes-gcm-siv = { version = "0.11", optional = true }
+hkdf = { version = "0.12", optional = true }
+sha2 = { version = "0.10", optional = true }
+
+[dev-dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[package.metadata.docs.rs]
+all-features = true
