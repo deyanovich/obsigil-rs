@@ -1,7 +1,8 @@
 //! # obsigil
 //!
-//! A mandate-token format: a JWT-like token split into a public
-//! **manifest** and an encrypted **mandate**. Each half is an
+//! A mandate-token format and shared-secret **JWT alternative**: a
+//! token split into a public **manifest** and an encrypted
+//! **mandate**. Each half is an
 //! authenticated, deterministically-encrypted ciphertext — AES-SIV
 //! (RFC 5297, code `0`) or AES-GCM-SIV (RFC 8452, code `1`) — joined by a
 //! separator that names the text encoding (`.` b64, `~` hex), with a
@@ -14,7 +15,9 @@
 //! This crate is the **backend** side: an [`Issuer`] mints mandates under
 //! a secret [`MandateKey`], and [`Verifier::verify`] checks them against the
 //! reserved fields (spec §11). The manifest is keyless and advisory; open
-//! it with [`open_manifest`].
+//! it with [`open_manifest`]. Verification is symmetric — the same
+//! [`MandateKey`] both mints and verifies — so obsigil fits shared-secret
+//! (HS256-style) JWT and JWE use cases, not public-key verification.
 //!
 //! Built directly on RustCrypto (`aes-siv`, `aes-gcm-siv`, `hkdf`). Only
 //! authenticated AEADs are ever compiled in, so an unauthenticated mandate

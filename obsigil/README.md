@@ -1,8 +1,8 @@
 # obsigil
 
-A mandate-token format: a JWT-like token split into a public
-**manifest** and an encrypted **mandate**, joined by a single
-separator:
+A mandate-token format and shared-secret **JWT alternative**: a
+token split into a public **manifest** and an encrypted
+**mandate**, joined by a single separator:
 
     token = [ manifest ALG ] SEP [ ALG mandate ]
 
@@ -14,6 +14,10 @@ ciphertext — AES-SIV (RFC 5297, code `0`) or AES-GCM-SIV
 (RFC 8452, code `1`) — built directly on RustCrypto. Only
 authenticated AEADs are ever compiled in, so an unauthenticated
 mandate is structurally unrepresentable.
+
+Verification is symmetric — the same secret [`MandateKey`] both
+mints and verifies — so obsigil fits shared-secret (HS256-style)
+JWT and JWE use cases, not public-key verification.
 
 The two halves are independent and have disjoint audiences:
 
