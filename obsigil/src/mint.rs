@@ -11,9 +11,8 @@ use crate::aead::seal;
 use crate::encoding::{encode_into, encoded_len};
 use crate::error::MintError;
 use crate::key::MandateKey;
-use crate::reserved::{Claims, Clauses};
-use crate::serial::to_plaintext;
-use crate::types::{Alg, Encoding, Format, NumericDate, MANIFEST_KEY};
+use crate::serial;
+use crate::types::{Alg, Encoding, NumericDate, MANIFEST_KEY};
 
 /// A configured token issuer. Holds the secret mandate key and the default
 /// algorithm/serialization/encoding for the tokens it mints. Mint under one
@@ -21,15 +20,13 @@ use crate::types::{Alg, Encoding, Format, NumericDate, MANIFEST_KEY};
 pub struct Issuer {
     key: MandateKey,
     mandate_alg: Alg,
-    mandate_format: Format,
     manifest_alg: Alg,
-    manifest_format: Format,
     encoding: Encoding,
 }
 
 impl Issuer {
-    /// A new issuer with spec defaults: AES-SIV (code 0), JSON, and the
-    /// `.`/b64 encoding for the whole token.
+    /// A new issuer with spec defaults: AES-SIV (code 0), canonical CBOR
+    /// fields, and the `.`/b64 encoding for the whole token.
     ///
     /// ```rust
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -46,9 +43,7 @@ impl Issuer {
         Issuer {
             key,
             mandate_alg: Alg::Siv,
-            mandate_format: Format::Json,
             manifest_alg: Alg::Siv,
-            manifest_format: Format::Json,
             encoding: Encoding::B64,
         }
     }
@@ -59,38 +54,9 @@ impl Issuer {
         self
     }
 
-    /// Set the mandate's serialization (default [`Format::Json`]).
-    ///
-    /// ```rust
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// # #[cfg(feature = "cbor")]
-    /// # {
-    /// use obsigil::{Format, Issuer, MandateKey, NoApp, Verifier};
-    /// let token = Issuer::new(MandateKey::from_bytes([42u8; 64])?)
-    ///     .format(Format::Cbor) // serialize the mandate as CBOR
-    ///     .mandate(&NoApp::default())
-    ///     .exp(4_000_000_000)
-    ///     .mint()?;
-    /// let key = MandateKey::from_bytes([42u8; 64])?;
-    /// assert!(Verifier::new().key(&key).now(1_000_000_000)
-    ///     .verify::<NoApp>(&token).is_ok());
-    /// # }
-    /// # Ok(()) }
-    /// ```
-    pub fn format(mut self, format: Format) -> Self {
-        self.mandate_format = format;
-        self
-    }
-
     /// Set the manifest's algorithm code (default [`Alg::Siv`]).
     pub fn manifest_alg(mut self, alg: Alg) -> Self {
         self.manifest_alg = alg;
-        self
-    }
-
-    /// Set the manifest's serialization (default [`Format::Json`]).
-    pub fn manifest_format(mut self, format: Format) -> Self {
-        self.manifest_format = format;
         self
     }
 
@@ -155,7 +121,8 @@ impl<'a, T: Serialize> MintBuilder<'a, T> {
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_secs() as NumericDate)
             .unwrap_or(0);
-        self.exp = Some(now + ttl.as_secs() as NumericDate);
+        let ttl = NumericDate::try_from(ttl.as_secs()).unwrap_or(NumericDate::MAX);
+        self.exp = Some(now.saturating_add(ttl));
         self
     }
 
@@ -230,12 +197,7 @@ impl<'a, T: Serialize> MintBuilder<'a, T> {
     /// # Ok(()) }
     /// ```
     pub fn manifest<M: Serialize>(mut self, iss: impl Into<String>, claims: &M) -> Self {
-        let wire = Claims {
-            iss: iss.into(),
-            exp: None,
-            app: claims,
-        };
-        self.manifest_plain = Some(to_plaintext(&wire, self.issuer.manifest_format));
+        self.manifest_plain = Some(serial::to_manifest_plaintext(&iss.into(), claims));
         self
     }
 
@@ -249,17 +211,25 @@ impl<'a, T: Serialize> MintBuilder<'a, T> {
             }
         }
         let tid = self.tid.unwrap_or_else(Uuid::now_v7);
+        // A provided `tid` must be a well-formed UUIDv7 — version 7 and the RFC
+        // 4122 variant (spec §12.3); the auto-generated one always is. Catching
+        // it here stops any front-end from minting a token the verifier would
+        // only reject later.
+        if tid.get_version_num() != 7 || tid.get_variant() != uuid::Variant::RFC4122 {
+            return Err(MintError::BadTid);
+        }
 
-        let clauses = Clauses {
-            exp: Some(exp),
-            tid: Some(tid),
-            iss: self.iss,
-            aud: self.aud,
-            sub: self.sub,
-            app: self.app,
-        };
-        // Seal both halves first (the manifest is optional).
-        let mandate_plain = to_plaintext(&clauses, self.issuer.mandate_format)?;
+        // Seal both halves first (the manifest is optional). The mandate
+        // plaintext carries the secret clauses, so it is wiped on drop; the
+        // keyless manifest plaintext is public and needs no wipe.
+        let mandate_plain = zeroize::Zeroizing::new(serial::to_mandate_plaintext(
+            exp,
+            tid,
+            self.iss.as_deref(),
+            self.aud.as_deref(),
+            self.sub.as_deref(),
+            self.app,
+        )?);
         let mandate_sealed = seal(&mandate_plain, self.issuer.key.bytes(), self.issuer.mandate_alg)?;
         let manifest_sealed = match self.manifest_plain {
             Some(result) => Some(seal(&result?, &MANIFEST_KEY, self.issuer.manifest_alg)?),

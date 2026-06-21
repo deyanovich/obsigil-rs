@@ -29,6 +29,16 @@ pub enum Reason {
     /// `aud` is present and the verifier's identifier is not a member (or
     /// `aud` is an empty array).
     AudienceMismatch,
+    /// The plaintext is not canonical CBOR — an indefinite-length item, a
+    /// non-shortest integer, length, or float, a `NaN`, unsorted or duplicate
+    /// map keys, or trailing bytes (spec §7, §9.9).
+    NonCanonical,
+    /// A reserved field carries a value of the wrong CBOR type — e.g. `exp`
+    /// not an integer, `aud` not an array of text strings (spec §9.9).
+    BadType,
+    /// The half carries an unrecognized negative integer key. Negative keys
+    /// are obsigil's namespace, so an unknown one fails closed (spec §7).
+    UnknownReservedKey,
 }
 
 /// The single, opaque failure a verifier returns. Its [`Display`] is
@@ -119,15 +129,28 @@ pub enum MintError {
     Missing(&'static str),
     /// `aud` was set to an empty array (spec §11.4).
     EmptyAudience,
+    /// The provided `tid` is not a well-formed UUIDv7 — version 7 with the
+    /// RFC 4122 variant (spec §12.3). The auto-generated `tid` always is; this
+    /// guards a `tid` set explicitly via [`MintBuilder::tid`](crate::MintBuilder::tid).
+    BadTid,
     /// The chosen algorithm code is not compiled into this build.
     UnsupportedAlg(Alg),
-    /// The chosen serialization is not compiled into this build.
-    UnsupportedFormat(Format),
+    /// The application value did not serialize to a CBOR map. obsigil merges
+    /// application fields into the half's map (spec §7), so the value must be
+    /// a map/struct; use [`NoApp`](crate::NoApp) for a half with no app data.
+    AppNotMap,
+    /// An application field used a negative integer key, which is reserved to
+    /// obsigil (spec §7). Application keys are non-negative integers and text
+    /// strings.
+    ReservedKey,
+    /// An application field carried a floating-point `NaN`, which has no
+    /// canonical CBOR encoding and is forbidden (spec §7).
+    Nan,
     /// Serializing the fields failed.
     Serialization(String),
 }
 
-use crate::types::{Alg, Format};
+use crate::types::Alg;
 
 impl fmt::Display for MintError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -138,16 +161,19 @@ impl fmt::Display for MintError {
             MintError::EmptyAudience => {
                 f.write_str("obsigil mint: `aud` must be a non-empty array")
             }
+            MintError::BadTid => {
+                f.write_str("obsigil mint: `tid` must be a UUIDv7 (version 7, RFC 4122 variant)")
+            }
             MintError::UnsupportedAlg(a) => {
                 write!(f, "obsigil mint: algorithm `{}` not enabled", a.code())
             }
-            MintError::UnsupportedFormat(fmt) => {
-                write!(
-                    f,
-                    "obsigil mint: serialization `{}` not enabled",
-                    fmt.tag() as char
-                )
+            MintError::AppNotMap => {
+                f.write_str("obsigil mint: application value must serialize to a CBOR map")
             }
+            MintError::ReservedKey => {
+                f.write_str("obsigil mint: application field used a reserved negative key")
+            }
+            MintError::Nan => f.write_str("obsigil mint: application field must not be NaN"),
             MintError::Serialization(msg) => write!(f, "obsigil mint: serialization failed: {msg}"),
         }
     }

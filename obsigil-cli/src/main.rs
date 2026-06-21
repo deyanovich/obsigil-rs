@@ -2,9 +2,11 @@
 //!
 //! High-level: `mint`, `verify`, `open-manifest`, `forward`. Byte-level
 //! conformance ops (spec §10): `seal`, `open`, `parse`. Keys are given as
-//! 128 hex chars, or the keywords `manifest` / `mandate` for the published
-//! test keys (the manifest key from the spec; the mandate key is
-//! SHA-512("obsigil test mandate key v1")).
+//! 128 hex chars or a published-test-key keyword: `mandate` (the secret test
+//! key, SHA-512("obsigil test mandate key v1")) wherever a key is taken, and
+//! `manifest` (the public manifest key from the spec) for the byte-level
+//! `seal`/`open` ops only — `mint`/`verify` reject it as a mandate key
+//! (spec §4.1).
 //!
 //! Exit codes: 0 success; 1 operation rejected (verify/open/parse failure —
 //! uniform, per spec §9.5); 2 usage error.
@@ -15,7 +17,7 @@ use std::time::Duration;
 
 use clap::{Args, Parser, Subcommand};
 use obsigil::lowlevel::{self, Alg, Encoding};
-use obsigil::{open_manifest, Format, Issuer, MandateKey, Uuid, Verifier};
+use obsigil::{open_manifest, Issuer, MandateKey, Uuid, Verifier};
 use serde_json::{json, Value};
 
 /// The published test mandate key: SHA-512("obsigil test mandate key v1"),
@@ -53,7 +55,7 @@ enum Cmd {
 
 #[derive(Args)]
 struct MintArgs {
-    /// Mandate key: 128 hex chars, or `mandate` / `manifest`.
+    /// Mandate key: 128 hex chars, or `mandate` (the published test key).
     #[arg(short = 'k', long)]
     key: String,
     /// Expiry as a NumericDate (seconds since the Unix epoch).
@@ -74,9 +76,6 @@ struct MintArgs {
     /// Mandate issuer (for audit).
     #[arg(long)]
     iss: Option<String>,
-    /// Mandate serialization: json | toml | cbor.
-    #[arg(long, default_value = "json")]
-    format: String,
     /// Mandate algorithm code: 0 (AES-SIV) | 1 (AES-GCM-SIV).
     #[arg(long, default_value = "0")]
     alg: String,
@@ -92,9 +91,6 @@ struct MintArgs {
     /// Manifest application claims as a JSON object.
     #[arg(long)]
     manifest_fields: Option<String>,
-    /// Manifest serialization: json | toml | cbor.
-    #[arg(long, default_value = "json")]
-    manifest_format: String,
     /// Manifest algorithm code: 0 (AES-SIV) | 1 (AES-GCM-SIV).
     #[arg(long, default_value = "0")]
     manifest_alg: String,
@@ -104,7 +100,7 @@ struct MintArgs {
 struct VerifyArgs {
     /// Token (or `-` for stdin).
     token: String,
-    /// Candidate mandate key(s); repeatable. Hex, or `mandate` / `manifest`.
+    /// Candidate mandate key(s); repeatable. Hex, or `mandate`.
     #[arg(short = 'k', long)]
     key: Vec<String>,
     /// This verifier's audience identifier.
@@ -123,7 +119,7 @@ struct VerifyArgs {
 
 #[derive(Args)]
 struct SealArgs {
-    /// Raw octets `tag || serialized-fields` as hex; `-` reads stdin.
+    /// Raw octets (a half's canonical CBOR plaintext) as hex; `-` reads stdin.
     #[arg(long)]
     octets: String,
     /// Key: 128 hex chars, or `manifest` / `mandate`.
@@ -185,9 +181,7 @@ fn cmd_mint(a: MintArgs) -> Result<ExitCode, String> {
     let key = MandateKey::from_bytes(resolve_key(&a.key)?).map_err(|e| e.to_string())?;
     let issuer = Issuer::new(key)
         .alg(parse_alg(&a.alg)?)
-        .format(parse_format(&a.format)?)
         .manifest_alg(parse_alg(&a.manifest_alg)?)
-        .manifest_format(parse_format(&a.manifest_format)?)
         .encoding(parse_encoding(&a.encoding)?);
 
     let fields = read_input(a.fields.as_deref().unwrap_or("{}"))?;
@@ -391,16 +385,6 @@ fn parse_encoding(s: &str) -> Result<Encoding, String> {
         "hex" => Ok(Encoding::Hex),
         _ => Err(format!("--encoding must be b64 or hex, got `{s}`")),
     }
-}
-
-fn parse_format(s: &str) -> Result<Format, String> {
-    let tag = match s {
-        "json" => b'j',
-        "toml" => b't',
-        "cbor" => b'c',
-        _ => return Err(format!("--format must be json, toml, or cbor, got `{s}`")),
-    };
-    Format::from_tag(tag).ok_or_else(|| format!("format `{s}` not enabled in this build"))
 }
 
 /// Return `s`, or read trimmed stdin when `s == "-"`.

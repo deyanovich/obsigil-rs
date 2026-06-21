@@ -12,13 +12,15 @@ mints, so obsigil fits shared-secret (HS256-style) JWT and JWE
 use cases, not public-key verification.
 
 Sealing is two-layer: a secret-keyed mandate and a keyless,
-tamper-evident manifest. Claim serializations are JSON, TOML,
-and CBOR, per half. The spec deliberately omits any format
-whose decoder can execute code or build arbitrary objects (Perl
-`eval`, YAML full-load), since the manifest is
-attacker-forgeable. See the obsigil spec for the authoritative
-format definition.
+tamper-evident manifest. Each half's fields are a single
+canonical CBOR map (RFC 8949 §4.2) — obsigil's reserved fields
+at negative integer keys, application data at non-negative
+integer and text-string keys. See the obsigil spec for the
+authoritative format definition.
 
 ## Layout
 
 - [`obsigil/`](obsigil/) — the `obsigil` library crate.
+- [`obsigil-cli/`](obsigil-cli/) — the `obsigil` command-line tool
+  (mint, verify, open-manifest, forward, and the byte-level
+  conformance ops).

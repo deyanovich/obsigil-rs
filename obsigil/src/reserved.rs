@@ -1,6 +1,7 @@
 //! Reserved fields and the verified/opened views (spec §11). The library
-//! owns the reserved names; application data is an arbitrary `T` merged via
-//! `#[serde(flatten)]`. There is no `iat` — issue time derives from `tid`
+//! owns the reserved fields, carried at negative integer keys (spec §7);
+//! application data is an arbitrary `T` merged in at non-negative integer and
+//! text-string keys. There is no `iat` — issue time derives from `tid`
 //! (spec §11.3).
 
 use serde::{Deserialize, Serialize};
@@ -13,22 +14,17 @@ use crate::types::{tid_issued_at, NumericDate};
 #[derive(Serialize, Deserialize, Default, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NoApp {}
 
-/// Mandate clauses on the wire (spec §11). `exp`/`tid` are `Option` so a
-/// missing one deserializes to `None` and is reported as a precise reason
-/// rather than a generic decode error; both are always present on mint.
-#[derive(Serialize, Deserialize, Debug)]
+/// A mandate's reserved clauses plus the application value, read from (or
+/// assembled for) the canonical-CBOR map (spec §7, §11). `exp`/`tid` are
+/// `Option` so the verifier can report a missing one as a precise reason; a
+/// verified mandate always carries both.
+#[derive(Debug)]
 pub(crate) struct Clauses<T> {
-    #[serde(default)]
     pub exp: Option<NumericDate>,
-    #[serde(default)]
     pub tid: Option<Uuid>,
-    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub iss: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub aud: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub sub: Option<String>,
-    #[serde(flatten)]
     pub app: T,
 }
 
@@ -101,14 +97,13 @@ impl<T> Mandate<T> {
     }
 }
 
-/// Manifest claims on the wire (spec §11). `iss` is required: a manifest
-/// lacking it is malformed and yields nothing (spec §11.2).
-#[derive(Serialize, Deserialize, Debug)]
+/// A manifest's reserved claims plus the application value (spec §7, §11).
+/// `iss` is required: a manifest lacking it is malformed and yields nothing
+/// (spec §11.2). `exp`, if present, is an advisory refresh hint.
+#[derive(Debug)]
 pub(crate) struct Claims<T> {
     pub iss: String,
-    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub exp: Option<NumericDate>,
-    #[serde(flatten)]
     pub app: T,
 }
 

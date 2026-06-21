@@ -1,20 +1,17 @@
 //! Cross-implementation conformance against the language-agnostic
-//! `obsigil-test-vectors` (spec §10). Runs only with the features needed to
-//! cover every vector; enable with `--all-features` (or
-//! `--features conformance,gcm-siv,toml,cbor`).
+//! `obsigil-test-vectors` (spec §10). Enable with
+//! `--features conformance,gcm-siv`.
 //!
 //! The vectors live in the sibling `obsigil-test-vectors` repo; point at a
 //! checkout with `OBSIGIL_TEST_VECTORS`, else the sibling path is used. If
-//! neither is present the tests skip rather than fail.
+//! neither is present the tests skip rather than fail. The vectors are
+//! byte-level (octets -> token), so this harness is serialization-agnostic;
+//! the vectors themselves must be regenerated for the canonical-CBOR model.
 
-#![cfg(all(
-    feature = "conformance",
-    feature = "gcm-siv",
-    feature = "toml",
-    feature = "cbor"
-))]
+#![cfg(all(feature = "conformance", feature = "gcm-siv"))]
 
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use obsigil::lowlevel::{self, Alg, Encoding, MANIFEST_KEY};
 use obsigil::{open_manifest, MandateKey, Verifier};
@@ -69,6 +66,13 @@ fn alg_of(s: &str) -> Alg {
 #[test]
 fn positives_reproduce_bidirectionally() {
     let Some(dir) = vectors_dir() else {
+        // A green run without the vectors does NOT establish conformance. CI
+        // sets OBSIGIL_REQUIRE_VECTORS to turn this silent skip into a failure.
+        assert!(
+            std::env::var_os("OBSIGIL_REQUIRE_VECTORS").is_none(),
+            "OBSIGIL_REQUIRE_VECTORS is set but obsigil-test-vectors was not found \
+             (set OBSIGIL_TEST_VECTORS or place the sibling checkout)"
+        );
         eprintln!("obsigil-test-vectors not found; skipping conformance");
         return;
     };
@@ -115,6 +119,13 @@ fn positives_reproduce_bidirectionally() {
 #[test]
 fn negatives_are_rejected() {
     let Some(dir) = vectors_dir() else {
+        // A green run without the vectors does NOT establish conformance. CI
+        // sets OBSIGIL_REQUIRE_VECTORS to turn this silent skip into a failure.
+        assert!(
+            std::env::var_os("OBSIGIL_REQUIRE_VECTORS").is_none(),
+            "OBSIGIL_REQUIRE_VECTORS is set but obsigil-test-vectors was not found \
+             (set OBSIGIL_TEST_VECTORS or place the sibling checkout)"
+        );
         eprintln!("obsigil-test-vectors not found; skipping conformance");
         return;
     };
@@ -136,6 +147,9 @@ fn negatives_are_rejected() {
                 }
                 if let Some(aud) = v.get("audience").and_then(Value::as_str) {
                     ver = ver.audience(aud);
+                }
+                if let Some(leeway) = v.get("leeway").and_then(Value::as_u64) {
+                    ver = ver.leeway(Duration::from_secs(leeway));
                 }
                 ver.verify::<Value>(token).is_err()
             }

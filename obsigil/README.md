@@ -39,14 +39,16 @@ the split is unambiguous either way. Either half may be empty,
 so a manifest-only (`manifest.`) or mandate-only (`.mandate`)
 token is valid.
 
-## Serializations
+## Serialization
 
-Each half names its serialization with a sealed one-byte tag:
-`j` JSON · `t` TOML · `c` CBOR. JSON is the mandatory default;
-TOML and CBOR are behind the `toml` / `cbor` features. The
-spec deliberately excludes any format whose decoder can execute
-code or build arbitrary objects (e.g. Perl `eval`, YAML
-full-load), since the manifest is attacker-forgeable.
+Both halves are a single canonical CBOR map (RFC 8949 §4.2).
+obsigil owns the encoding, so identical fields mint
+byte-identical tokens. Reserved fields take negative integer
+keys (`tid` is −1, then `exp`, `aud`, `sub`, `iss`); the
+non-negative integers and text strings are the application's. A
+verifier rejects any non-canonical encoding — unsorted or
+duplicate keys, non-shortest integers, indefinite lengths — and
+fails closed on an unrecognized negative key.
 
 ## Usage
 
@@ -100,9 +102,9 @@ logging only, never to the bearer.
 Pre-1.0; the API may still change before 1.0. The mint/verify
 core is complete: reserved-field enforcement (`exp`, `aud`,
 `tid`, manifest `iss`), multi-key trial decryption, the
-`.`/base64url and `~`/hex text encodings, and JSON/TOML/CBOR
-serializations, validated against the cross-language obsigil
-test vectors. Built on pre-1.0 RustCrypto AEADs.
+`.`/base64url and `~`/hex text encodings, and canonical-CBOR
+fields, validated against the cross-language obsigil test
+vectors. Built on pre-1.0 RustCrypto AEADs.
 
 ## License
 

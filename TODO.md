@@ -35,7 +35,15 @@ implemented — do **not** redo. (The API moved from a flat
   against the sibling `obsigil-test-vectors` (positive
   bidirectional reproduction + negative cases). See
   `tests/conformance.rs`.
-- **Packaging: version** — `0.1.0` for the first release.
+- **Packaging: version** — `0.2.0` for the canonical-CBOR
+  model (a breaking change from the `0.1.x` per-half
+  JSON/TOML/CBOR serialization).
+- **Canonical-CBOR serialization** (spec §7). Both halves are a
+  fixed canonical CBOR map; reserved fields at negative integer
+  keys (`tid` −1 … `iss` −5), obsigil-owned encoding, strict
+  rejection of non-canonical input, and the sign-split
+  namespace (unknown negative key fails closed). See
+  `serial.rs`.
 
 ## Open
 
@@ -48,20 +56,15 @@ implemented — do **not** redo. (The API moved from a flat
   far. Re-check against the spec whether anything is still owed
   now that sealing is direct-on-RustCrypto rather than via
   oboron's a-tier.
-- **kaiv encoding.** Add a `k` tag once the kaiv format
-  stabilizes (the spec reserves it).
-
 ## Non-goals
 
-- **`p` (Perl hashref) and `y` (YAML) — excluded from the spec.**
-  The spec's encoding rule is *capability-based*: a tag MUST NOT
-  name a serialization whose decoder *can* execute code or
-  construct arbitrary objects, because the keyless manifest is
-  attacker-forgeable. `p` (`eval`-ed Perl source) and `y` (YAML —
-  full-schema loaders construct arbitrary objects, the
-  `yaml.load` / `Psych` RCE class) both fail that test, so
-  neither is reserved — gone, not deferred. Allowed serializations
-  are `j` (JSON), `t` (TOML), `c` (CBOR) — distinct from the text
-  encoding (`b64`/`hex`), which the separator carries. (See the
-  `Encoding` enum doc, the spec's *Serialization* section, and
-  `../spec/RATIONALE.md` for the full reasoning.)
+- **Per-half serialization choice (`j`/`t`/`c`) and the `p`/`y`
+  exclusions — gone in `0.2`.** The model fixes one
+  serialization (canonical CBOR), so there is no tag registry
+  and no per-format capability rule to police: obsigil only
+  ever CBOR-decodes, a pure data format, so the
+  forged-manifest-RCE vector the old rule guarded against (Perl
+  `eval`, YAML full-load) is foreclosed by construction. An
+  application that needs a foreign serialization carries it in
+  an opaque byte-string field and owns its own decoder. (See
+  the spec's *Serialization* section and `../spec/RATIONALE.md`.)

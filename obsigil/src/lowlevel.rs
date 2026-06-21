@@ -3,7 +3,8 @@
 //! generating and checking the language-agnostic test vectors. This is not
 //! the everyday API — mint and verify are. A positive vector reproduces by
 //! sealing the given octets and matching the byte string; this module is
-//! the entry point that makes that possible without a serializer.
+//! the entry point that makes that possible without a serializer. The octets
+//! are a half's canonical CBOR plaintext (spec §7).
 
 use crate::aead;
 use crate::encoding as enc;
@@ -11,8 +12,8 @@ use crate::token;
 
 pub use crate::types::{Alg, Encoding, MANIFEST_KEY};
 
-/// Seal raw octets (`tag || serialized-fields`) under a 64-byte key with
-/// `alg`. `None` if `alg` is not compiled into this build (spec §5).
+/// Seal raw octets (a half's canonical CBOR plaintext) under a 64-byte key
+/// with `alg`. `None` if `alg` is not compiled into this build (spec §5).
 pub fn seal(octets: &[u8], key: &[u8; 64], alg: Alg) -> Option<Vec<u8>> {
     aead::seal(octets, key, alg).ok()
 }

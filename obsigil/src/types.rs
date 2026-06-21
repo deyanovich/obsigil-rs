@@ -79,47 +79,6 @@ impl Encoding {
     }
 }
 
-/// A half's serialization, named by a one-byte tag sealed inside it
-/// (spec §7). Only pure data formats are registered.
-///
-/// ```rust
-/// use obsigil::Format;
-/// assert_eq!(Format::Json.tag(), b'j');
-/// assert_eq!(Format::from_tag(b'j'), Some(Format::Json));
-/// assert_eq!(Format::from_tag(b'x'), None);
-/// ```
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-#[non_exhaustive]
-pub enum Format {
-    /// Tag `j` — JSON.
-    Json,
-    /// Tag `t` — TOML (`toml` feature).
-    Toml,
-    /// Tag `c` — CBOR (`cbor` feature).
-    Cbor,
-}
-
-impl Format {
-    /// The one-byte serialization tag.
-    pub fn tag(self) -> u8 {
-        match self {
-            Format::Json => b'j',
-            Format::Toml => b't',
-            Format::Cbor => b'c',
-        }
-    }
-
-    /// Map a serialization tag byte to its format.
-    pub fn from_tag(tag: u8) -> Option<Format> {
-        match tag {
-            b'j' => Some(Format::Json),
-            b't' => Some(Format::Toml),
-            b'c' => Some(Format::Cbor),
-            _ => None,
-        }
-    }
-}
-
 /// The public 64-byte manifest key pinned by the spec (§4.2). Every
 /// conformant implementation MUST use this exact value. It is public: it
 /// opens *and* forges manifests, which is the point — the manifest is an

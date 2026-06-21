@@ -11,25 +11,50 @@ use crate::encoding::decode;
 use crate::error::{Error, Reason};
 use crate::key::MandateKey;
 use crate::reserved::{Claims, Clauses, Mandate, Manifest};
-use crate::serial::from_fields;
+use crate::serial;
 use crate::token::parse;
 use crate::types::{Alg, NumericDate, MANIFEST_KEY};
 
-/// Lowest legal decoded half length: 16-byte AEAD floor + 1-byte tag (§5.2).
+/// Lowest legal decoded half length: the 16-byte AEAD floor plus at least one
+/// byte of CBOR plaintext (the shortest being the empty map, `0xa0`) (§5.2).
 const MIN_HALF_BYTES: usize = 17;
+
+/// Hard ceiling on clock-skew leeway, in seconds (spec §9.9): a configured
+/// leeway is bounded by this maximum so an over-large value cannot silently
+/// extend a token past its `exp`. The spec's example bound is 60 seconds.
+const MAX_LEEWAY: NumericDate = 60;
+
+/// Default cap on a half's decoded byte length (spec §9.9): a generous bound
+/// that admits any realistic mandate while refusing an attacker-supplied
+/// oversize half before any trial decryption. Override with
+/// [`Verifier::max_decoded_len`].
+const DEFAULT_MAX_DECODED_LEN: usize = 64 * 1024;
 
 /// A configured mandate verifier (spec §9). Verify against one or more
 /// candidate keys by trial decryption (spec §9.4); reusable across tokens.
-#[derive(Default)]
 pub struct Verifier<'a> {
     keys: Vec<&'a MandateKey>,
     audience: Option<String>,
     leeway: NumericDate,
     now: Option<NumericDate>,
+    max_decoded_len: usize,
+}
+
+impl Default for Verifier<'_> {
+    fn default() -> Self {
+        Verifier {
+            keys: Vec::new(),
+            audience: None,
+            leeway: 0,
+            now: None,
+            max_decoded_len: DEFAULT_MAX_DECODED_LEN,
+        }
+    }
 }
 
 impl<'a> Verifier<'a> {
-    /// A new verifier with no keys, no audience, and no leeway.
+    /// A new verifier with no keys, no audience, no leeway, and the default
+    /// maximum decoded half size (64 KiB).
     pub fn new() -> Self {
         Self::default()
     }
@@ -73,9 +98,12 @@ impl<'a> Verifier<'a> {
         self
     }
 
-    /// Allow a clock-skew leeway when checking `exp` (spec §11.1).
+    /// Allow a clock-skew leeway when checking `exp` (spec §12.1). The leeway
+    /// is bounded by a hard maximum of 60 seconds (spec §9.9): a larger value
+    /// is clamped down, so an over-large leeway can never silently extend a
+    /// token past its expiry.
     pub fn leeway(mut self, leeway: Duration) -> Self {
-        self.leeway = leeway.as_secs() as NumericDate;
+        self.leeway = leeway.as_secs().min(MAX_LEEWAY as u64) as NumericDate;
         self
     }
 
@@ -101,6 +129,15 @@ impl<'a> Verifier<'a> {
     /// ```
     pub fn now(mut self, now: NumericDate) -> Self {
         self.now = Some(now);
+        self
+    }
+
+    /// Set the maximum decoded byte length accepted for the mandate half
+    /// (spec §9.9). A half whose decoded ciphertext exceeds this is rejected
+    /// uniformly, before any trial decryption, so the bound caps per-key AEAD
+    /// work on attacker input without becoming an oracle. Defaults to 64 KiB.
+    pub fn max_decoded_len(mut self, max: usize) -> Self {
+        self.max_decoded_len = max;
         self
     }
 
@@ -139,24 +176,35 @@ impl<'a> Verifier<'a> {
         let half = parsed.mandate.ok_or(Reason::EmptyMandate)?;
         let alg = Alg::from_code(half.alg_code).ok_or(Reason::Unsupported)?;
 
+        // §9.9: bound the half before any decode or trial decryption so an
+        // oversize token cannot force repeated per-key AEAD work. Guard the
+        // encoded length first (a cheap over-estimate of the decoded length —
+        // hex is the densest at 2 chars/byte), then the decoded length exactly.
+        if half.text.len() > self.max_decoded_len.saturating_mul(2).saturating_add(8) {
+            return Err(Reason::Malformed);
+        }
         let sealed = decode(half.text, parsed.encoding).ok_or(Reason::Malformed)?;
-        if sealed.len() < MIN_HALF_BYTES {
+        if sealed.len() < MIN_HALF_BYTES || sealed.len() > self.max_decoded_len {
             return Err(Reason::Malformed);
         }
 
-        // Trial decryption over candidate keys; wrong key fails closed.
+        // Trial decryption over candidate keys; wrong key fails closed. The
+        // decrypted plaintext carries the mandate's secret clauses, so it is
+        // wiped on drop (the sealed ciphertext is public and needs no wipe).
         let plain = self
             .keys
             .iter()
             .find_map(|k| open(&sealed, k.bytes(), alg))
+            .map(zeroize::Zeroizing::new)
             .ok_or(Reason::AuthFailed)?;
 
-        let (tag, fields) = plain.split_first().ok_or(Reason::Malformed)?;
-        let clauses: Clauses<T> = from_fields(*tag, fields).ok_or(Reason::Malformed)?;
+        let clauses: Clauses<T> = serial::from_mandate_plaintext(&plain)?;
 
-        // tid present and a well-formed UUIDv7 (spec §11.3).
+        // tid present and a well-formed UUIDv7: version field 7 AND the RFC
+        // 4122 variant 0b10 (spec §12.3). Checking the version alone would
+        // accept a v7-versioned UUID carrying a non-conformant variant.
         let tid = clauses.tid.ok_or(Reason::BadTid)?;
-        if tid.get_version_num() != 7 {
+        if tid.get_version_num() != 7 || tid.get_variant() != uuid::Variant::RFC4122 {
             return Err(Reason::BadTid);
         }
 
@@ -203,8 +251,8 @@ fn now_unix() -> NumericDate {
 /// Open the manifest of a token for display (spec §4.2, §11.2). Keyless and
 /// advisory — never authoritative (spec §9.6). Returns `None` on anything
 /// untrustworthy: no manifest, malformed token, bad encoding, auth failure,
-/// unsupported algorithm/serialization, or a manifest missing its `iss`.
-/// Never an oracle.
+/// an unsupported algorithm, non-canonical CBOR, or a manifest missing its
+/// `iss`. Never an oracle.
 ///
 /// ```rust
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -221,12 +269,17 @@ pub fn open_manifest<T: DeserializeOwned>(token: &str) -> Option<Manifest<T>> {
     let parsed = parse(token).ok()?;
     let half = parsed.manifest?;
     let alg = Alg::from_code(half.alg_code)?;
+    // Bound the half (§9.9) before decode/decrypt, matching the verifier's
+    // default cap. The manifest is keyless (one decryption, no trial loop), so
+    // there is no per-key amplification, but a ceiling still bounds the work.
+    if half.text.len() > DEFAULT_MAX_DECODED_LEN.saturating_mul(2).saturating_add(8) {
+        return None;
+    }
     let sealed = decode(half.text, parsed.encoding)?;
-    if sealed.len() < MIN_HALF_BYTES {
+    if sealed.len() < MIN_HALF_BYTES || sealed.len() > DEFAULT_MAX_DECODED_LEN {
         return None;
     }
     let plain = open(&sealed, &MANIFEST_KEY, alg)?;
-    let (tag, fields) = plain.split_first()?;
-    let claims: Claims<T> = from_fields(*tag, fields)?;
+    let claims: Claims<T> = serial::from_manifest_plaintext(&plain)?;
     Some(Manifest { inner: claims })
 }

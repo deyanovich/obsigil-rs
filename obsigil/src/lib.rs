@@ -66,14 +66,6 @@
 //! # Ok(()) }
 //! ```
 
-// At least one serialization format must be compiled in; without one the
-// mint/verify API cannot encode or decode claims (spec §7).
-#[cfg(not(any(feature = "json", feature = "toml", feature = "cbor")))]
-compile_error!(
-    "obsigil requires at least one serialization feature: \
-     `json` (the default), `toml`, or `cbor`"
-);
-
 mod aead;
 mod encoding;
 mod error;
@@ -92,7 +84,7 @@ pub use error::{Error, KeyError, MintError, Reason};
 pub use key::MandateKey;
 pub use mint::{Issuer, MintBuilder};
 pub use reserved::{Mandate, Manifest, NoApp};
-pub use types::{tid_issued_at, Alg, Encoding, Format, NumericDate, MANIFEST_KEY};
+pub use types::{tid_issued_at, Alg, Encoding, NumericDate, MANIFEST_KEY};
 pub use verify::{open_manifest, Verifier};
 
 // Re-exported for callers handling `tid` (spec §11.3).
