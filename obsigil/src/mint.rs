@@ -230,7 +230,11 @@ impl<'a, T: Serialize> MintBuilder<'a, T> {
             self.sub.as_deref(),
             self.app,
         )?);
-        let mandate_sealed = seal(&mandate_plain, self.issuer.key.bytes(), self.issuer.mandate_alg)?;
+        let mandate_sealed = seal(
+            &mandate_plain,
+            self.issuer.key.bytes(),
+            self.issuer.mandate_alg,
+        )?;
         let manifest_sealed = match self.manifest_plain {
             Some(result) => Some(seal(&result?, &MANIFEST_KEY, self.issuer.manifest_alg)?),
             None => None,

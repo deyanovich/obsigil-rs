@@ -169,7 +169,10 @@ fn verifier_rejects_malformed_tid() {
     let key = MandateKey::from_bytes(KEY_BYTES).unwrap();
     // Canonical key order: -1 (0x20) before -2 (0x21).
     let reason = |tid: &str| {
-        let token = craft(vec![(ik(-1), tid_bytes(tid)), (ik(-2), exp_val(4_000_000_000))]);
+        let token = craft(vec![
+            (ik(-1), tid_bytes(tid)),
+            (ik(-2), exp_val(4_000_000_000)),
+        ]);
         Verifier::new()
             .key(&key)
             .now(1_000_000_000)
@@ -178,9 +181,15 @@ fn verifier_rejects_malformed_tid() {
             .reason()
     };
     // Wrong version (nil UUID, version 0).
-    assert_eq!(reason("00000000-0000-0000-0000-000000000000"), Reason::BadTid);
+    assert_eq!(
+        reason("00000000-0000-0000-0000-000000000000"),
+        Reason::BadTid
+    );
     // Version 7 but a non-RFC-4122 variant (NCS, nibble 0) — the `tid` field (§8.2).
-    assert_eq!(reason("019ed29a-378d-72f0-0462-4929cd2bfcad"), Reason::BadTid);
+    assert_eq!(
+        reason("019ed29a-378d-72f0-0462-4929cd2bfcad"),
+        Reason::BadTid
+    );
     // A well-formed v7 tid verifies.
     let good = craft(vec![
         (ik(-1), tid_bytes("019ed29a-378d-72f0-b462-4929cd2bfcad")),
@@ -217,7 +226,10 @@ fn verifier_rejects_noncanonical_cbor() {
     );
     // Keys out of canonical order (-2 before -1) is non-canonical.
     assert_eq!(
-        reason(vec![(ik(-2), exp_val(4_000_000_000)), (ik(-1), tid_bytes(tid))]),
+        reason(vec![
+            (ik(-2), exp_val(4_000_000_000)),
+            (ik(-1), tid_bytes(tid))
+        ]),
         Reason::NonCanonical
     );
     // An unrecognized negative key fails closed (obsigil's namespace).
@@ -250,7 +262,10 @@ fn rejects_invalid_utf8_text_string() {
     // (the text string's bytes are not UTF-8), so both the enforcing and the
     // diagnostic decode terminals reject it.
     let v = Verifier::new().key(&key).now(1_000_000_000);
-    assert_eq!(v.clauses::<NoApp>(&token).unwrap_err().reason(), Reason::Malformed);
+    assert_eq!(
+        v.clauses::<NoApp>(&token).unwrap_err().reason(),
+        Reason::Malformed
+    );
     assert_eq!(
         v.clauses_unchecked::<NoApp>(&token).unwrap_err().reason(),
         Reason::Malformed
@@ -310,7 +325,10 @@ fn leeway_is_capped_at_the_maximum() {
         .key(&key)
         .now(1_000_000_000)
         .leeway(Duration::from_secs(9_999_999_999));
-    assert_eq!(v.clauses::<NoApp>(&token).unwrap_err().reason(), Reason::Expired);
+    assert_eq!(
+        v.clauses::<NoApp>(&token).unwrap_err().reason(),
+        Reason::Expired
+    );
 
     // Within the cap, leeway still works (exp 1000 + 60 > now 1030).
     let v = Verifier::new()
@@ -324,7 +342,10 @@ fn leeway_is_capped_at_the_maximum() {
         .key(&key)
         .now(1_061)
         .leeway(Duration::from_secs(60));
-    assert_eq!(v.clauses::<NoApp>(&token).unwrap_err().reason(), Reason::Expired);
+    assert_eq!(
+        v.clauses::<NoApp>(&token).unwrap_err().reason(),
+        Reason::Expired
+    );
 }
 
 #[test]
@@ -393,7 +414,10 @@ fn rejects_oversize_mandate_half() {
 
     // Default cap rejects it uniformly (before any trial decryption).
     let v = Verifier::new().key(&key).now(1_000_000_000);
-    assert_eq!(v.clauses::<Big>(&token).unwrap_err().reason(), Reason::Malformed);
+    assert_eq!(
+        v.clauses::<Big>(&token).unwrap_err().reason(),
+        Reason::Malformed
+    );
 
     // A raised cap admits the same token.
     let v = Verifier::new()
@@ -412,8 +436,9 @@ fn mandate_only_token_has_no_manifest() {
         .unwrap();
     assert!(token.starts_with('.')); // no manifest half
     assert!(claims::<NoApp>(&token).is_none());
-    assert!(obsigil::manifest(&token).is_none()); // no standalone manifest half
-    // ...but the mandate half carves out and re-verifies on its own.
+    // No standalone manifest half, but the mandate half carves out and
+    // re-verifies on its own.
+    assert!(obsigil::manifest(&token).is_none());
     let forwarded = obsigil::mandate(&token).expect("has a mandate half");
     let key = MandateKey::from_bytes(KEY_BYTES).unwrap();
     assert!(Verifier::new()

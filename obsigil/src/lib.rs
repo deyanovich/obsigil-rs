@@ -87,9 +87,7 @@ pub use key::{generate_key, MandateKey};
 pub use mint::{Issuer, MintBuilder};
 pub use reserved::{Claims, Clauses, NoApp};
 pub use types::{tid_issued_at, Alg, Encoding, NumericDate, MANIFEST_KEY};
-pub use verify::{
-    authorization_header, claims, mandate, manifest, manifest_plaintext, Verifier,
-};
+pub use verify::{authorization_header, claims, mandate, manifest, manifest_plaintext, Verifier};
 
 // Re-exported for callers handling `tid` (the `tid` field, §8.2).
 pub use uuid::Uuid;

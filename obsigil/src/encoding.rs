@@ -65,7 +65,10 @@ mod tests {
         let mut hex = String::new();
         encode_into(&bytes, Encoding::Hex, &mut hex);
         assert_eq!(hex, "000fa9ff10");
-        assert_eq!(decode("000fa9ff10", Encoding::Hex).as_deref(), Some(&bytes[..]));
+        assert_eq!(
+            decode("000fa9ff10", Encoding::Hex).as_deref(),
+            Some(&bytes[..])
+        );
         assert_eq!(decode("abc", Encoding::Hex), None); // odd length
         assert_eq!(decode("AB", Encoding::Hex), None); // uppercase
         assert_eq!(decode("zz", Encoding::Hex), None); // out of alphabet

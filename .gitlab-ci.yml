@@ -1,0 +1,72 @@
+# CI for obsigil. Runs on the authoritative (private) GitLab project;
+# the public mirror does not run CI.
+#
+# Uses gitlab.com shared runners with the official Rust Docker image, so
+# no custom runner tags are required. The pipeline gates the library's
+# test suite (including the cross-language conformance vectors) across the
+# feature matrix, plus clippy and rustfmt — obsigil must never ship with a
+# failing or unrun test.
+
+stages:
+  - test
+
+variables:
+  CARGO_TERM_COLOR: always
+  CARGO_HOME: "$CI_PROJECT_DIR/.cargo"
+
+cache:
+  key: "$CI_COMMIT_REF_SLUG"
+  paths:
+    - .cargo/registry/
+    - target/
+
+default:
+  image: rust:latest
+  before_script:
+    - rustc --version && cargo --version
+
+# Full library test suite with every feature enabled, then the reduced
+# feature combinations built on their own. The conformance vectors live
+# in a submodule, so the checkout must be recursive; OBSIGIL_REQUIRE_VECTORS
+# turns a missing-vectors skip into a hard failure so the cross-language
+# gate cannot silently go unrun.
+test:
+  stage: test
+  variables:
+    GIT_SUBMODULE_STRATEGY: recursive
+    OBSIGIL_REQUIRE_VECTORS: "1"
+  script:
+    # --all-features enables gcm-siv (algorithm code 1) and conformance,
+    # so the conformance harness (gated on both) runs against the vectors.
+    - cargo test -p obsigil --all-features
+    # The default surface (algorithm code 0 / AES-SIV only) and the
+    # gcm-siv-only surface must each build on their own, and the CLI must
+    # build with its conformance + gcm-siv feature set.
+    - cargo build -p obsigil --no-default-features
+    - cargo build -p obsigil --no-default-features --features gcm-siv
+    - cargo build -p obsigil-cli
+
+# clippy across the whole workspace with warnings denied. The library,
+# the CLI, and the conformance-only surface must all be warning-clean.
+lint:
+  stage: test
+  script:
+    - rustup component add clippy
+    - cargo clippy --workspace --all-features -- -D warnings
+
+# Enforces rustfmt's default style across the whole workspace. No
+# rustfmt.toml — pure default style.
+fmt:
+  stage: test
+  script:
+    - rustup component add rustfmt
+    - cargo fmt --all -- --check
+
+# Validates the declared MSRV (rust-version = 1.83.0). Required — a
+# failure means the declared floor is no longer honest.
+msrv:
+  stage: test
+  image: rust:1.83.0
+  cache: {}
+  script:
+    - cargo build --workspace --all-features

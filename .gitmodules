@@ -1,0 +1,3 @@
+[submodule "obsigil/tests/vectors"]
+	path = obsigil/tests/vectors
+	url = https://gitlab.com/obsigil/obsigil-test-vectors.git

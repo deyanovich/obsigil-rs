@@ -83,7 +83,9 @@ fn contains_nan(value: &Value) -> bool {
     match value {
         Value::Float(f) => f.is_nan(),
         Value::Array(items) => items.iter().any(contains_nan),
-        Value::Map(entries) => entries.iter().any(|(k, v)| contains_nan(k) || contains_nan(v)),
+        Value::Map(entries) => entries
+            .iter()
+            .any(|(k, v)| contains_nan(k) || contains_nan(v)),
         Value::Tag(_, inner) => contains_nan(inner),
         _ => false,
     }
@@ -212,7 +214,10 @@ fn strict_map(plain: &[u8]) -> Result<Vec<(Value, Value)>, Reason> {
     };
     // NaN has no canonical bit pattern across encoders, so obsigil forbids it
     // (the Serialization rules, §7). ciborium would otherwise accept the canonical quiet NaN.
-    if entries.iter().any(|(k, v)| contains_nan(k) || contains_nan(v)) {
+    if entries
+        .iter()
+        .any(|(k, v)| contains_nan(k) || contains_nan(v))
+    {
         return Err(Reason::NonCanonical);
     }
     // A CBOR map key that is not an integer or text string has no portable
@@ -330,7 +335,9 @@ pub(crate) fn from_mandate_plaintext<T: DeserializeOwned>(
 /// The manifest is advisory: any decode problem, a missing `iss`, or any
 /// reserved key other than `iss`/`exp` yields `None` (open as nothing rather
 /// than fail), never an oracle (the non-authoritative-manifest rule of the Security Considerations, §16.7).
-pub(crate) fn from_manifest_plaintext<T: DeserializeOwned>(plain: &[u8]) -> Option<ManifestFields<T>> {
+pub(crate) fn from_manifest_plaintext<T: DeserializeOwned>(
+    plain: &[u8],
+) -> Option<ManifestFields<T>> {
     let entries = strict_map(plain).ok()?;
     let mut iss = None;
     let mut exp = None;
@@ -389,17 +396,48 @@ mod tests {
         assert_eq!(c.exp, Some(1000));
         assert_eq!(c.tid, Some(tid));
         assert_eq!(c.iss.as_deref(), Some("auth.example"));
-        assert_eq!(c.aud.as_deref(), Some(&["api".to_string(), "admin".to_string()][..]));
+        assert_eq!(
+            c.aud.as_deref(),
+            Some(&["api".to_string(), "admin".to_string()][..])
+        );
         assert_eq!(c.sub.as_deref(), Some("user-1"));
-        assert_eq!(c.app, App { role: "admin".into(), n: 7 });
+        assert_eq!(
+            c.app,
+            App {
+                role: "admin".into(),
+                n: 7
+            }
+        );
     }
 
     #[test]
     fn encoding_is_canonical_and_deterministic() {
         // Same logical fields -> byte-identical plaintext.
         let tid = tid7();
-        let a = to_mandate_plaintext(1, tid, None, None, None, &App { role: "x".into(), n: 1 }).unwrap();
-        let b = to_mandate_plaintext(1, tid, None, None, None, &App { role: "x".into(), n: 1 }).unwrap();
+        let a = to_mandate_plaintext(
+            1,
+            tid,
+            None,
+            None,
+            None,
+            &App {
+                role: "x".into(),
+                n: 1,
+            },
+        )
+        .unwrap();
+        let b = to_mandate_plaintext(
+            1,
+            tid,
+            None,
+            None,
+            None,
+            &App {
+                role: "x".into(),
+                n: 1,
+            },
+        )
+        .unwrap();
         assert_eq!(a, b);
         // Keys are sorted: app non-negative/text keys precede the negative
         // reserved keys in canonical order (major type 0/3 before 1)? No — the
@@ -407,7 +445,13 @@ mod tests {
         // and there are no non-negative int keys here, so order is: tid(-1),
         // exp(-2)... then text app keys. We just assert it re-validates.
         let c: MandateFields<App> = from_mandate_plaintext(&a).unwrap();
-        assert_eq!(c.app, App { role: "x".into(), n: 1 });
+        assert_eq!(
+            c.app,
+            App {
+                role: "x".into(),
+                n: 1
+            }
+        );
     }
 
     #[test]
@@ -418,8 +462,8 @@ mod tests {
             (ikey(KEY_EXP), Value::Integer(Integer::from(5))),
             (ikey(KEY_TID), Value::Bytes(tid.as_bytes().to_vec())),
         ]);
-        let bytes = encode(&unsorted); // not key-sorted (-2 before -1)
         // -2 encodes 0x21, -1 encodes 0x20; canonical wants 0x20 first.
+        let bytes = encode(&unsorted); // not key-sorted (-2 before -1)
         assert_eq!(
             from_mandate_plaintext::<crate::reserved::NoApp>(&bytes).unwrap_err(),
             Reason::NonCanonical
@@ -464,7 +508,10 @@ mod tests {
     fn rejects_nan_float() {
         // An application NaN float — even ciborium's canonical quiet NaN — has
         // no canonical bit pattern across encoders and is rejected (the Serialization rules, §7).
-        let m = Value::Map(vec![(Value::Integer(Integer::from(0)), Value::Float(f64::NAN))]);
+        let m = Value::Map(vec![(
+            Value::Integer(Integer::from(0)),
+            Value::Float(f64::NAN),
+        )]);
         let bytes = encode(&m);
         assert_eq!(
             from_mandate_plaintext::<crate::reserved::NoApp>(&bytes).unwrap_err(),
@@ -510,9 +557,22 @@ mod tests {
 
     #[test]
     fn manifest_round_trips() {
-        let pt = to_manifest_plaintext("auth.example", &App { role: "ui".into(), n: 2 }).unwrap();
+        let pt = to_manifest_plaintext(
+            "auth.example",
+            &App {
+                role: "ui".into(),
+                n: 2,
+            },
+        )
+        .unwrap();
         let c: ManifestFields<App> = from_manifest_plaintext(&pt).unwrap();
         assert_eq!(c.iss, "auth.example");
-        assert_eq!(c.app, App { role: "ui".into(), n: 2 });
+        assert_eq!(
+            c.app,
+            App {
+                role: "ui".into(),
+                n: 2
+            }
+        );
     }
 }

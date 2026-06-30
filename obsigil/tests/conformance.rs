@@ -2,9 +2,10 @@
 //! `obsigil-test-vectors` (the Conformance and test vectors section, §13). Enable with
 //! `--features conformance,gcm-siv`.
 //!
-//! The vectors live in the sibling `obsigil-test-vectors` repo; point at a
-//! checkout with `OBSIGIL_TEST_VECTORS`, else the sibling path is used. If
-//! neither is present the tests skip rather than fail. The vectors are
+//! The vectors are vendored as a git submodule at `tests/vectors` (what CI
+//! checks out); override with `OBSIGIL_TEST_VECTORS`, or fall back to the
+//! sibling `obsigil-test-vectors` repo in a plain group checkout. If none
+//! is present the tests skip rather than fail. The vectors are
 //! byte-level (octets -> token), so this harness is serialization-agnostic:
 //! each `octets` field is already a half's canonical CBOR plaintext (the Serialization rules, §7),
 //! sealed and matched as raw bytes.
@@ -28,7 +29,14 @@ fn vectors_dir() -> Option<PathBuf> {
         let p = PathBuf::from(p);
         return p.is_dir().then_some(p);
     }
-    let sibling = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../obsigil-test-vectors");
+    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    // Vendored as a submodule at `obsigil/tests/vectors` (what CI checks
+    // out); use it only when actually populated.
+    let submodule = manifest.join("tests/vectors");
+    if submodule.join("test-vectors.jsonl").is_file() {
+        return Some(submodule);
+    }
+    let sibling = manifest.join("../../obsigil-test-vectors");
     sibling.is_dir().then_some(sibling)
 }
 
