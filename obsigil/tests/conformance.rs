@@ -1,12 +1,13 @@
 //! Cross-implementation conformance against the language-agnostic
-//! `obsigil-test-vectors` (spec §10). Enable with
+//! `obsigil-test-vectors` (the Conformance and test vectors section, §13). Enable with
 //! `--features conformance,gcm-siv`.
 //!
 //! The vectors live in the sibling `obsigil-test-vectors` repo; point at a
 //! checkout with `OBSIGIL_TEST_VECTORS`, else the sibling path is used. If
 //! neither is present the tests skip rather than fail. The vectors are
-//! byte-level (octets -> token), so this harness is serialization-agnostic;
-//! the vectors themselves must be regenerated for the canonical-CBOR model.
+//! byte-level (octets -> token), so this harness is serialization-agnostic:
+//! each `octets` field is already a half's canonical CBOR plaintext (the Serialization rules, §7),
+//! sealed and matched as raw bytes.
 
 #![cfg(all(feature = "conformance", feature = "gcm-siv"))]
 
@@ -14,7 +15,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use obsigil::lowlevel::{self, Alg, Encoding, MANIFEST_KEY};
-use obsigil::{open_manifest, MandateKey, Verifier};
+use obsigil::{claims, MandateKey, Verifier};
 use serde_json::Value;
 
 /// The published test mandate key (see the vectors' README).
@@ -137,7 +138,8 @@ fn negatives_are_rejected() {
         let token = v["token"].as_str().unwrap();
         let rejected = match op {
             "parse" => lowlevel::parse(token).is_none(),
-            "open-manifest" => open_manifest::<Value>(token).is_none(),
+            // The vectors' op name stays `open-manifest`; the API is `claims`.
+            "open-manifest" => claims::<Value>(token).is_none(),
             "verify" => {
                 let key = key_for(v.get("key").and_then(|k| k.as_str()).unwrap_or("mandate"));
                 let mk = MandateKey::from_bytes(key).expect("vector mandate key");
@@ -151,7 +153,7 @@ fn negatives_are_rejected() {
                 if let Some(leeway) = v.get("leeway").and_then(Value::as_u64) {
                     ver = ver.leeway(Duration::from_secs(leeway));
                 }
-                ver.verify::<Value>(token).is_err()
+                ver.clauses::<Value>(token).is_err()
             }
             other => panic!("unknown op {other}"),
         };

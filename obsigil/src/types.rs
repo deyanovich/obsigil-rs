@@ -1,4 +1,4 @@
-//! Format-level enumerations and constants (spec §3, §4.2, §5, §7).
+//! Format-level enumerations and constants (the Token structure section, §4; the published manifest key, §5.2; the Algorithm registry, §6; the Serialization rules, §7).
 
 use uuid::Uuid;
 
@@ -6,7 +6,7 @@ use uuid::Uuid;
 pub type NumericDate = i64;
 
 /// The AEAD that seals a half, named by its single-character algorithm
-/// code in the clear next to the separator (spec §5).
+/// code in the clear next to the separator (the Algorithm registry, §6).
 ///
 /// ```rust
 /// use obsigil::Alg;
@@ -33,7 +33,7 @@ impl Alg {
     }
 
     /// Parse an algorithm code character. Returns `None` for any code this
-    /// build does not implement (spec §5).
+    /// build does not implement (the Algorithm registry, §6).
     pub fn from_code(c: char) -> Option<Alg> {
         match c {
             '0' => Some(Alg::Siv),
@@ -44,7 +44,7 @@ impl Alg {
 }
 
 /// A token's text encoding, selected for the whole token by the separator
-/// (spec §3): `.` => b64, `~` => hex.
+/// (the Token structure section, §4): `.` => b64, `~` => hex.
 ///
 /// ```rust
 /// use obsigil::Encoding;
@@ -79,7 +79,7 @@ impl Encoding {
     }
 }
 
-/// The public 64-byte manifest key pinned by the spec (§4.2). Every
+/// The public 64-byte manifest key pinned by the spec (the published manifest key, §5.2). Every
 /// conformant implementation MUST use this exact value. It is public: it
 /// opens *and* forges manifests, which is the point — the manifest is an
 /// encoding wrapper, not a security layer.
@@ -94,7 +94,7 @@ pub const MANIFEST_KEY: [u8; 64] = [
     0xdd, 0x9f, 0x7a, 0xa8, 0xa9, 0x5d, 0xbd, 0xd5, //
 ];
 
-/// The mandate's issue time, derived from a UUIDv7 `tid` (spec §11.3): the
+/// The mandate's issue time, derived from a UUIDv7 `tid` (the `tid` field, §8.2): the
 /// 48-bit big-endian Unix-millisecond field, floored to whole seconds for
 /// NumericDate semantics. obsigil defines no separate `iat`.
 ///

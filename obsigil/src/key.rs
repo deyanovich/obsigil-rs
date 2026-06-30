@@ -1,18 +1,18 @@
-//! The secret mandate key (spec §4.1).
+//! The secret mandate key (the mandate construction, §5.1).
 
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::error::KeyError;
 use crate::types::MANIFEST_KEY;
 
-/// A secret 64-byte mandate master key (spec §4.1). Zeroized on drop; never
+/// A secret 64-byte mandate master key (the mandate construction, §5.1). Zeroized on drop; never
 /// `Debug`/`Display` its bytes. One key both mints and verifies mandates
-/// (spec §9.1).
+/// (the symmetric-key property of the Security Considerations, §16.1).
 #[derive(Zeroize, ZeroizeOnDrop)]
 pub struct MandateKey([u8; 64]);
 
 impl MandateKey {
-    /// Generate a fresh key from the platform CSPRNG (spec §4.1).
+    /// Generate a fresh key from the platform CSPRNG (the mandate construction, §5.1).
     ///
     /// ```rust
     /// use obsigil::MandateKey;
@@ -27,7 +27,7 @@ impl MandateKey {
     }
 
     /// Wrap 64 bytes as a mandate key. Rejects the public manifest key and
-    /// an all-zero value (spec §4.1). The caller is responsible for the
+    /// an all-zero value (the mandate construction, §5.1). The caller is responsible for the
     /// bytes being uniformly random from a CSPRNG.
     ///
     /// ```rust
@@ -49,4 +49,17 @@ impl MandateKey {
     pub(crate) fn bytes(&self) -> &[u8; 64] {
         &self.0
     }
+}
+
+/// Generate a fresh [`MandateKey`] from the platform CSPRNG (the mandate construction, §5.1) — the
+/// free-function form of [`MandateKey::generate`].
+///
+/// ```rust
+/// use obsigil::generate_key;
+/// // 64 bytes from the OS CSPRNG, zeroized on drop.
+/// let key = generate_key();
+/// # let _ = key;
+/// ```
+pub fn generate_key() -> MandateKey {
+    MandateKey::generate()
 }

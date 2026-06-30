@@ -22,5 +22,5 @@ authoritative format definition.
 
 - [`obsigil/`](obsigil/) — the `obsigil` library crate.
 - [`obsigil-cli/`](obsigil-cli/) — the `obsigil` command-line tool
-  (mint, verify, open-manifest, forward, and the byte-level
-  conformance ops).
+  (mint, clauses, claims, mandate, manifest, generate-key, and the
+  byte-level conformance ops).

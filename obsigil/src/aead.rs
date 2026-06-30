@@ -1,4 +1,4 @@
-//! Deterministic AEAD seal/open (spec §5). No random nonce, no associated
+//! Deterministic AEAD seal/open (the Sealing parameters and output layout, §6.2). No random nonce, no associated
 //! data. All RustCrypto usage is isolated to this file.
 //!
 //!   Code 0 (AES-SIV): the full 64-byte master is the AES-256-SIV key.
@@ -13,7 +13,7 @@ use crate::types::Alg;
 
 /// Seal a half's plaintext (`tag || serialized-fields`) under a 64-byte
 /// master with the AEAD named by `alg`. Errors only if `alg` is not
-/// compiled into this build (spec §5).
+/// compiled into this build (the Algorithm registry, §6).
 pub fn seal(plaintext: &[u8], master: &[u8; 64], alg: Alg) -> Result<Vec<u8>, MintError> {
     match alg {
         Alg::Siv => Ok(seal_siv(plaintext, master)),
@@ -35,7 +35,7 @@ fn seal_siv(plaintext: &[u8], master: &[u8; 64]) -> Vec<u8> {
     use aes_siv::siv::Aes256Siv;
     use aes_siv::KeyInit;
     let mut cipher = Aes256Siv::new(master.into());
-    let headers: [&[u8]; 0] = []; // zero-element AD vector (spec §5.2)
+    let headers: [&[u8]; 0] = []; // zero-element AD vector (the Sealing parameters and output layout, §6.2)
     cipher.encrypt(headers, plaintext).expect("SIV encrypt")
 }
 
@@ -52,7 +52,7 @@ fn gcm_siv_key(master: &[u8; 64]) -> zeroize::Zeroizing<[u8; 32]> {
     use hkdf::Hkdf;
     use sha2::Sha256;
     // HKDF-Expand only: master IS the PRK (already uniformly random),
-    // info = "gcmsiv", L = 32 (spec §5.1). No Extract step. The derived
+    // info = "gcmsiv", L = 32 (the Key material derivation, §6.1). No Extract step. The derived
     // subkey is wrapped in `Zeroizing` so it is wiped on drop.
     let hk = Hkdf::<Sha256>::from_prk(master).expect("PRK >= 32 bytes");
     let mut okm = zeroize::Zeroizing::new([0u8; 32]);
@@ -66,7 +66,7 @@ fn seal_gcm_siv(plaintext: &[u8], master: &[u8; 64]) -> Result<Vec<u8>, MintErro
     use aes_gcm_siv::{Aes256GcmSiv, KeyInit, Nonce};
     let key = gcm_siv_key(master);
     let cipher = Aes256GcmSiv::new((&*key).into());
-    let nonce = Nonce::from_slice(&[0u8; 12]); // fixed nonce (spec §5.2)
+    let nonce = Nonce::from_slice(&[0u8; 12]); // fixed nonce (the Sealing parameters and output layout, §6.2)
     Ok(cipher.encrypt(nonce, plaintext).expect("GCM-SIV encrypt"))
 }
 

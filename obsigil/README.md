@@ -53,7 +53,7 @@ fails closed on an unrecognized negative key.
 ## Usage
 
 ```rust
-use obsigil::{open_manifest, Issuer, Mandate, MandateKey, Manifest, Verifier};
+use obsigil::{claims, Claims, Clauses, Issuer, MandateKey, Verifier};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
@@ -62,34 +62,34 @@ struct Access { role: String }
 #[derive(Serialize, Deserialize)]
 struct Display { theme: String }
 
-// A 64-byte a-tier secret (e.g. from MandateKey::generate()).
+// A 64-byte secret (e.g. from generate_key()).
 let key = MandateKey::from_bytes([42u8; 64])?;
 
 // Issuer: mint a token. The mandate carries the authoritative
-// claims; the optional manifest carries advisory ones.
+// clauses; the optional manifest carries advisory claims.
 let token = Issuer::new(key)
-    .mandate(&Access { role: "admin".into() })
+    .clauses(&Access { role: "admin".into() })
     .exp(4_000_000_000)
     .audience(["api"])
     .subject("u42")
     .manifest("auth.example", &Display { theme: "dark".into() })
     .mint()?;
 
-// Front end: read the manifest, no secret needed (advisory).
-let manifest: Manifest<Display> = open_manifest(&token).expect("present");
-assert_eq!(manifest.app().theme, "dark");
+// Front end: read the manifest's claims, no secret needed (advisory).
+let advisory: Claims<Display> = claims(&token).expect("present");
+assert_eq!(advisory.app().theme, "dark");
 
-// Backend: verify the mandate against a candidate key (or
+// Backend: verify the mandate's clauses against a candidate key (or
 // several — trial decryption picks the one that authenticates).
 let key = MandateKey::from_bytes([42u8; 64])?;
-let mandate: Mandate<Access> = Verifier::new()
+let mandate: Clauses<Access> = Verifier::new()
     .key(&key)
     .audience("api")
-    .verify(&token)?;
+    .clauses(&token)?;
 assert_eq!(mandate.app().role, "admin");
 ```
 
-A verifier enforces the reserved clauses (spec §11): a present
+A verifier enforces the reserved clauses (the Reserved fields section, §8): a present
 mandate MUST carry `exp` (rejected once `now >= exp`, with
 optional leeway) and a UUIDv7 `tid`; a present `aud` is checked
 for membership against the verifier's identifier in constant

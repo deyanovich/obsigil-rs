@@ -19,7 +19,7 @@ High-level:
 - `open-manifest` — open a token's keyless, advisory manifest
 - `forward` — print the forwardable `.0mandate` form of a token
 
-Byte-level conformance ops (spec §10):
+Byte-level conformance ops (the Conformance and test vectors section, §13):
 
 - `seal` / `open` — seal raw octets into a half ciphertext and back
 - `parse` — parse a token structurally to JSON
@@ -28,7 +28,7 @@ Keys are 128 hex characters or a published-test-key keyword:
 `mandate` (the secret test key) wherever a key is taken, and
 `manifest` (the public manifest key) for the byte-level `seal` /
 `open` ops only — `mint` and `verify` reject the manifest key as a
-mandate key (spec §4.1). Any token argument may be `-` to read from
+mandate key (the mandate construction, §5.1). Any token argument may be `-` to read from
 stdin.
 
 ## Example
@@ -45,7 +45,7 @@ obsigil verify "$TOKEN" --key mandate --audience api
 
 - `0` — success
 - `1` — operation rejected (verify/open/parse failure — uniform,
-  per spec §9.5)
+  per the uniform-failure rule of the Security Considerations, §16.6)
 - `2` — usage error
 
 ## License

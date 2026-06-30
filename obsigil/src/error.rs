@@ -1,10 +1,10 @@
 //! Error types. Verification failures are uniform and opaque to the bearer
-//! (spec §9.5); minting and key errors are descriptive (the trusted side).
+//! (the uniform-failure rule of the Security Considerations, §16.6); minting and key errors are descriptive (the trusted side).
 
 use core::fmt;
 
-/// Why a verification was rejected. **Internal/diagnostic only.** Per spec
-/// §9.5 a verifier MUST NOT signal *why* a token was rejected to the
+/// Why a verification was rejected. **Internal/diagnostic only.** Per
+/// the uniform-failure rule of the Security Considerations (§16.6), a verifier MUST NOT signal *why* a token was rejected to the
 /// bearer; this granular cause is for server-side logging and telemetry.
 /// Never place it (or [`Error`]'s `Debug`) in a bearer-facing response.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -31,18 +31,18 @@ pub enum Reason {
     AudienceMismatch,
     /// The plaintext is not canonical CBOR — an indefinite-length item, a
     /// non-shortest integer, length, or float, a `NaN`, unsorted or duplicate
-    /// map keys, or trailing bytes (spec §7, §9.9).
+    /// map keys, or trailing bytes (the Serialization rules, §7; the Limits and robustness rules of the Security Considerations, §16.10).
     NonCanonical,
     /// A reserved field carries a value of the wrong CBOR type — e.g. `exp`
-    /// not an integer, `aud` not an array of text strings (spec §9.9).
+    /// not an integer, `aud` not an array of text strings (the Limits and robustness rules of the Security Considerations, §16.10).
     BadType,
     /// The half carries an unrecognized negative integer key. Negative keys
-    /// are obsigil's namespace, so an unknown one fails closed (spec §7).
+    /// are obsigil's namespace, so an unknown one fails closed (the Serialization rules, §7).
     UnknownReservedKey,
 }
 
 /// The single, opaque failure a verifier returns. Its [`Display`] is
-/// uniform across every cause (spec §9.5); the granular [`Reason`] is
+/// uniform across every cause (the uniform-failure rule of the Security Considerations, §16.6); the granular [`Reason`] is
 /// available via [`Error::reason`] for internal logging only.
 ///
 /// [`Display`]: fmt::Display
@@ -51,12 +51,12 @@ pub enum Reason {
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// use obsigil::{Issuer, MandateKey, NoApp, Reason, Verifier};
 /// let token = Issuer::new(MandateKey::from_bytes([42u8; 64])?)
-///     .mandate(&NoApp::default())
+///     .clauses(&NoApp::default())
 ///     .exp(1_000)
 ///     .mint()?;
 /// let key = MandateKey::from_bytes([42u8; 64])?;
 /// let err = Verifier::new().key(&key).now(2_000)
-///     .verify::<NoApp>(&token)
+///     .clauses::<NoApp>(&token)
 ///     .unwrap_err();
 /// // The bearer sees one uniform message...
 /// assert_eq!(err.to_string(), "obsigil: token rejected");
@@ -73,7 +73,7 @@ impl Error {
     }
 
     /// The internal cause, for server-side logging/telemetry **only**. Do
-    /// not surface this to the bearer (spec §9.5).
+    /// not surface this to the bearer (the uniform-failure rule of the Security Considerations, §16.6).
     pub fn reason(&self) -> Reason {
         self.0
     }
@@ -101,7 +101,7 @@ impl std::error::Error for Error {}
 #[non_exhaustive]
 pub enum KeyError {
     /// The bytes equal the public manifest key — accepting it would let
-    /// anyone mint valid mandates (spec §4.1).
+    /// anyone mint valid mandates (the mandate construction, §5.1).
     IsManifestKey,
     /// The bytes are all zero.
     AllZero,
@@ -127,24 +127,24 @@ impl std::error::Error for KeyError {}
 pub enum MintError {
     /// A required field was not set (e.g. `exp`).
     Missing(&'static str),
-    /// `aud` was set to an empty array (spec §11.4).
+    /// `aud` was set to an empty array (the `aud` field, §8.4).
     EmptyAudience,
     /// The provided `tid` is not a well-formed UUIDv7 — version 7 with the
-    /// RFC 4122 variant (spec §12.3). The auto-generated `tid` always is; this
+    /// RFC 4122 variant (the `tid` field, §8.2). The auto-generated `tid` always is; this
     /// guards a `tid` set explicitly via [`MintBuilder::tid`](crate::MintBuilder::tid).
     BadTid,
     /// The chosen algorithm code is not compiled into this build.
     UnsupportedAlg(Alg),
     /// The application value did not serialize to a CBOR map. obsigil merges
-    /// application fields into the half's map (spec §7), so the value must be
+    /// application fields into the half's map (the Serialization rules, §7), so the value must be
     /// a map/struct; use [`NoApp`](crate::NoApp) for a half with no app data.
     AppNotMap,
     /// An application field used a negative integer key, which is reserved to
-    /// obsigil (spec §7). Application keys are non-negative integers and text
+    /// obsigil (the Serialization rules, §7). Application keys are non-negative integers and text
     /// strings.
     ReservedKey,
     /// An application field carried a floating-point `NaN`, which has no
-    /// canonical CBOR encoding and is forbidden (spec §7).
+    /// canonical CBOR encoding and is forbidden (the Serialization rules, §7).
     Nan,
     /// Serializing the fields failed.
     Serialization(String),

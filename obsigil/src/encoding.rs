@@ -1,4 +1,4 @@
-//! Strict, canonical text codecs (spec §3), backed by `data_encoding`.
+//! Strict, canonical text codecs (the Token structure section, §4), backed by `data_encoding`.
 //! Decoders reject any non-canonical input — padding, whitespace,
 //! out-of-alphabet characters, non-zero trailing b64 bits, bad lengths —
 //! by returning `None`.
@@ -7,7 +7,7 @@ use data_encoding::{BASE64URL_NOPAD, HEXLOWER};
 
 use crate::types::Encoding;
 
-/// Exact text length of `n` sealed bytes under `encoding` (spec §3).
+/// Exact text length of `n` sealed bytes under `encoding` (the Token structure section, §4).
 pub fn encoded_len(n: usize, encoding: Encoding) -> usize {
     match encoding {
         Encoding::B64 => BASE64URL_NOPAD.encode_len(n),
@@ -24,7 +24,7 @@ pub fn encode_into(bytes: &[u8], encoding: Encoding, out: &mut String) {
 }
 
 /// Decode a half's ciphertext text under the token's encoding. `None` on
-/// any non-canonical input (spec §3).
+/// any non-canonical input (the Token structure section, §4).
 pub fn decode(text: &str, encoding: Encoding) -> Option<Vec<u8>> {
     match encoding {
         Encoding::B64 => BASE64URL_NOPAD.decode(text.as_bytes()).ok(),

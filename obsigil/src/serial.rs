@@ -1,4 +1,4 @@
-//! Canonical CBOR serialization (spec §7). Both halves are a single
+//! Canonical CBOR serialization (the Serialization rules, §7). Both halves are a single
 //! canonical CBOR map (RFC 8949 §4.2): definite-length items, shortest-form
 //! integers and lengths, and map keys sorted by their encoded bytes.
 //! obsigil *owns* the encoding — given field *values*, it emits the canonical
@@ -20,10 +20,10 @@ use serde::Serialize;
 use uuid::Uuid;
 
 use crate::error::{MintError, Reason};
-use crate::reserved::{Claims, Clauses};
+use crate::reserved::{MandateFields, ManifestFields};
 use crate::types::NumericDate;
 
-// Reserved field keys (spec §11): negative integers, single-byte through -24.
+// Reserved field keys (the Reserved fields section, §8): negative integers, single-byte through -24.
 const KEY_TID: i8 = -1;
 const KEY_EXP: i8 = -2;
 const KEY_AUD: i8 = -3;
@@ -78,13 +78,31 @@ fn is_negative_int(k: &Value) -> bool {
 
 /// True iff `value` carries a floating-point `NaN` anywhere. `NaN` has no
 /// single canonical CBOR bit pattern across encoders, so obsigil forbids it
-/// (spec §7): mint refuses to emit one and a verifier rejects a half with one.
+/// (the Serialization rules, §7): mint refuses to emit one and a verifier rejects a half with one.
 fn contains_nan(value: &Value) -> bool {
     match value {
         Value::Float(f) => f.is_nan(),
         Value::Array(items) => items.iter().any(contains_nan),
         Value::Map(entries) => entries.iter().any(|(k, v)| contains_nan(k) || contains_nan(v)),
         Value::Tag(_, inner) => contains_nan(inner),
+        _ => false,
+    }
+}
+
+/// True iff `value` contains a CBOR map — at the top level or nested at any
+/// depth inside an application value — whose key is neither a CBOR integer
+/// nor a text string (the Serialization rules, §7). Such a key has no portable representation —
+/// Go cannot key a map by a byte slice — so obsigil forbids a non-integer,
+/// non-text key at *every* map depth, not only the half's top-level map. A
+/// verifier rejects a half with one rather than accept a token no conformant
+/// implementation could decode.
+fn has_invalid_map_key(value: &Value) -> bool {
+    match value {
+        Value::Map(entries) => entries.iter().any(|(k, v)| {
+            !matches!(k, Value::Integer(_) | Value::Text(_)) || has_invalid_map_key(v)
+        }),
+        Value::Array(items) => items.iter().any(has_invalid_map_key),
+        Value::Tag(_, inner) => has_invalid_map_key(inner),
         _ => false,
     }
 }
@@ -118,7 +136,7 @@ fn classify(k: &Value) -> KeyKind {
 
 /// Serialize the application value to a CBOR map's entries. Errors if it does
 /// not serialize to a map, or if it intrudes on the reserved namespace with a
-/// negative integer key (spec §7).
+/// negative integer key (the Serialization rules, §7).
 fn app_entries<T: Serialize>(app: &T) -> Result<Vec<(Value, Value)>, MintError> {
     let value = Value::serialized(app).map_err(|e| MintError::Serialization(e.to_string()))?;
     let entries = match value {
@@ -142,8 +160,8 @@ fn assemble(entries: Vec<(Value, Value)>) -> Vec<u8> {
 }
 
 /// Build a mandate's canonical-CBOR plaintext from its reserved clauses and
-/// application value (spec §7, §11). `tid` is encoded as its 16-byte binary
-/// form (spec §11.3).
+/// application value (the Serialization rules, §7; the Reserved fields section, §8). `tid` is encoded as its 16-byte binary
+/// form (the `tid` field, §8.2).
 pub(crate) fn to_mandate_plaintext<T: Serialize>(
     exp: NumericDate,
     tid: Uuid,
@@ -169,7 +187,7 @@ pub(crate) fn to_mandate_plaintext<T: Serialize>(
 }
 
 /// Build a manifest's canonical-CBOR plaintext: the required `iss` claim and
-/// the application claims (spec §7, §11.2).
+/// the application claims (the Serialization rules, §7; the `iss` field, §8.6).
 pub(crate) fn to_manifest_plaintext<T: Serialize>(
     iss: &str,
     app: &T,
@@ -182,7 +200,7 @@ pub(crate) fn to_manifest_plaintext<T: Serialize>(
 // --- verifying (canonical CBOR plaintext -> field values) ------------------
 
 /// Strictly decode a half plaintext to its map entries, rejecting any
-/// non-canonical encoding (spec §7, §9.9): a top-level non-map, a duplicate
+/// non-canonical encoding (the Serialization rules, §7; the Limits and robustness rules of the Security Considerations, §16.10): a top-level non-map, a duplicate
 /// map key, or — caught by re-encoding canonically and comparing — unsorted
 /// keys, non-shortest integers/lengths, indefinite-length items, or trailing
 /// bytes after the map.
@@ -193,8 +211,20 @@ fn strict_map(plain: &[u8]) -> Result<Vec<(Value, Value)>, Reason> {
         _ => return Err(Reason::Malformed),
     };
     // NaN has no canonical bit pattern across encoders, so obsigil forbids it
-    // (spec §7). ciborium would otherwise accept the canonical quiet NaN.
+    // (the Serialization rules, §7). ciborium would otherwise accept the canonical quiet NaN.
     if entries.iter().any(|(k, v)| contains_nan(k) || contains_nan(v)) {
+        return Err(Reason::NonCanonical);
+    }
+    // A CBOR map key that is not an integer or text string has no portable
+    // representation (Go cannot key a map by a byte slice), so obsigil forbids
+    // such a key at *every* map depth — not only this top-level map, but any
+    // map nested inside an application value (the Serialization rules, §7). Top-level keys are also
+    // classified per-field below; this recursion additionally reaches nested
+    // maps, which `classify` never sees.
+    if entries
+        .iter()
+        .any(|(k, v)| !matches!(k, Value::Integer(_) | Value::Text(_)) || has_invalid_map_key(v))
+    {
         return Err(Reason::NonCanonical);
     }
     // Canonical CBOR forbids duplicate keys.
@@ -257,13 +287,13 @@ fn decode_app<T: DeserializeOwned>(entries: Vec<(Value, Value)>) -> Result<T, Re
         .map_err(|_| Reason::Malformed)
 }
 
-/// Decode a mandate's canonical-CBOR plaintext into its clauses (spec §11).
+/// Decode a mandate's canonical-CBOR plaintext into its clauses (the Reserved fields section, §8).
 /// Presence and value-range policy (`tid` UUIDv7 version/variant, `exp`
 /// expiry, `aud` membership) is applied by the verifier; here we extract and
 /// type-check the reserved fields and split off the application clauses.
 pub(crate) fn from_mandate_plaintext<T: DeserializeOwned>(
     plain: &[u8],
-) -> Result<Clauses<T>, Reason> {
+) -> Result<MandateFields<T>, Reason> {
     let entries = strict_map(plain)?;
     let mut exp = None;
     let mut tid = None;
@@ -286,7 +316,7 @@ pub(crate) fn from_mandate_plaintext<T: DeserializeOwned>(
         }
     }
 
-    Ok(Clauses {
+    Ok(MandateFields {
         exp,
         tid,
         iss,
@@ -296,11 +326,11 @@ pub(crate) fn from_mandate_plaintext<T: DeserializeOwned>(
     })
 }
 
-/// Decode a manifest's canonical-CBOR plaintext into its claims (spec §11.2).
+/// Decode a manifest's canonical-CBOR plaintext into its claims (the `iss` field, §8.6).
 /// The manifest is advisory: any decode problem, a missing `iss`, or any
 /// reserved key other than `iss`/`exp` yields `None` (open as nothing rather
-/// than fail), never an oracle (spec §9.6).
-pub(crate) fn from_manifest_plaintext<T: DeserializeOwned>(plain: &[u8]) -> Option<Claims<T>> {
+/// than fail), never an oracle (the non-authoritative-manifest rule of the Security Considerations, §16.7).
+pub(crate) fn from_manifest_plaintext<T: DeserializeOwned>(plain: &[u8]) -> Option<ManifestFields<T>> {
     let entries = strict_map(plain).ok()?;
     let mut iss = None;
     let mut exp = None;
@@ -318,7 +348,7 @@ pub(crate) fn from_manifest_plaintext<T: DeserializeOwned>(plain: &[u8]) -> Opti
         }
     }
 
-    Some(Claims {
+    Some(ManifestFields {
         iss: iss?,
         exp,
         app: Value::Map(app).deserialized::<T>().ok()?,
@@ -355,7 +385,7 @@ mod tests {
             },
         )
         .unwrap();
-        let c: Clauses<App> = from_mandate_plaintext(&pt).unwrap();
+        let c: MandateFields<App> = from_mandate_plaintext(&pt).unwrap();
         assert_eq!(c.exp, Some(1000));
         assert_eq!(c.tid, Some(tid));
         assert_eq!(c.iss.as_deref(), Some("auth.example"));
@@ -376,7 +406,7 @@ mod tests {
         // app text keys (major type 3, 0x60+) sort AFTER the negatives (0x20+),
         // and there are no non-negative int keys here, so order is: tid(-1),
         // exp(-2)... then text app keys. We just assert it re-validates.
-        let c: Clauses<App> = from_mandate_plaintext(&a).unwrap();
+        let c: MandateFields<App> = from_mandate_plaintext(&a).unwrap();
         assert_eq!(c.app, App { role: "x".into(), n: 1 });
     }
 
@@ -433,7 +463,7 @@ mod tests {
     #[test]
     fn rejects_nan_float() {
         // An application NaN float — even ciborium's canonical quiet NaN — has
-        // no canonical bit pattern across encoders and is rejected (spec §7).
+        // no canonical bit pattern across encoders and is rejected (the Serialization rules, §7).
         let m = Value::Map(vec![(Value::Integer(Integer::from(0)), Value::Float(f64::NAN))]);
         let bytes = encode(&m);
         assert_eq!(
@@ -481,7 +511,7 @@ mod tests {
     #[test]
     fn manifest_round_trips() {
         let pt = to_manifest_plaintext("auth.example", &App { role: "ui".into(), n: 2 }).unwrap();
-        let c: Claims<App> = from_manifest_plaintext(&pt).unwrap();
+        let c: ManifestFields<App> = from_manifest_plaintext(&pt).unwrap();
         assert_eq!(c.iss, "auth.example");
         assert_eq!(c.app, App { role: "ui".into(), n: 2 });
     }

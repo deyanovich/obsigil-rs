@@ -1,5 +1,5 @@
 //! Token grammar: split a token into halves and read each present half's
-//! algorithm-code character (spec §3). Purely structural — no decoding,
+//! algorithm-code character (the Token structure section, §4). Purely structural — no decoding,
 //! decryption, or registry check. Algorithm codes are read positionally
 //! (a valid `0`-`9`/`a`-`z` char), so a code accepted here may still be
 //! unimplemented.
@@ -27,7 +27,7 @@ pub struct Parsed<'a> {
 }
 
 /// Why a token failed structural parsing. Diagnostic only — every cause
-/// collapses to a uniform failure at the bearer-facing boundary (spec §9.5).
+/// collapses to a uniform failure at the bearer-facing boundary (the uniform-failure rule of the Security Considerations, §16.6).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ParseError {
     Empty,
@@ -37,12 +37,12 @@ pub enum ParseError {
     BadAlgChar,
 }
 
-/// ALG = %x30-39 | %x61-7A : one char `0`-`9` or `a`-`z` (spec §3).
+/// ALG = %x30-39 | %x61-7A : one char `0`-`9` or `a`-`z` (the Token structure section, §4).
 fn is_alg_char(c: char) -> bool {
     c.is_ascii_digit() || c.is_ascii_lowercase()
 }
 
-/// Parse a token into its halves (spec §3).
+/// Parse a token into its halves (the Token structure section, §4).
 pub fn parse(input: &str) -> Result<Parsed<'_>, ParseError> {
     if input.is_empty() {
         return Err(ParseError::Empty);

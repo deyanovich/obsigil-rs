@@ -1,12 +1,14 @@
 [package]
 name = "obsigil"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 rust-version = "1.83.0"
 license = "MIT OR Apache-2.0"
 description = "A shared-secret JWT alternative: a mandate-token format splitting a public, advisory manifest from a secret-sealed, authenticated mandate (AES-SIV / AES-GCM-SIV), with fields in canonical CBOR"
 repository = "https://gitlab.com/obsigil/obsigil-rs"
+homepage = "https://obsigil.org"
 documentation = "https://docs.rs/obsigil"
+readme = "README.md"
 keywords = ["token", "jwt", "mandate", "aead", "authorization"]
 categories = ["cryptography", "authentication"]
 

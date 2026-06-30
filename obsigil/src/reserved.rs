@@ -1,8 +1,8 @@
-//! Reserved fields and the verified/opened views (spec §11). The library
-//! owns the reserved fields, carried at negative integer keys (spec §7);
+//! Reserved fields and the verified/opened views (the Reserved fields section, §8). The library
+//! owns the reserved fields, carried at negative integer keys (the Serialization rules, §7);
 //! application data is an arbitrary `T` merged in at non-negative integer and
 //! text-string keys. There is no `iat` — issue time derives from `tid`
-//! (spec §11.3).
+//! (the `tid` field, §8.2).
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -15,11 +15,11 @@ use crate::types::{tid_issued_at, NumericDate};
 pub struct NoApp {}
 
 /// A mandate's reserved clauses plus the application value, read from (or
-/// assembled for) the canonical-CBOR map (spec §7, §11). `exp`/`tid` are
+/// assembled for) the canonical-CBOR map (the Serialization rules, §7; the Reserved fields section, §8). `exp`/`tid` are
 /// `Option` so the verifier can report a missing one as a precise reason; a
-/// verified mandate always carries both.
+/// verified mandate always carries both. Internal backing for [`Clauses`].
 #[derive(Debug)]
-pub(crate) struct Clauses<T> {
+pub(crate) struct MandateFields<T> {
     pub exp: Option<NumericDate>,
     pub tid: Option<Uuid>,
     pub iss: Option<String>,
@@ -28,62 +28,77 @@ pub(crate) struct Clauses<T> {
     pub app: T,
 }
 
-/// A verified mandate. Constructible only by [`Verifier::verify`], so its
-/// existence is proof the mandate authenticated and passed policy
-/// (spec §9.2, §11).
+/// A verified mandate's clauses. Constructible only by the verifier
+/// terminals, so its existence is proof the mandate authenticated and
+/// decoded as canonical CBOR (the mandate-must-be-authenticated rule of the Security Considerations, §16.2; the Reserved fields section, §8).
 ///
-/// [`Verifier::verify`]: crate::Verifier::verify
+/// [`Verifier::clauses`]: crate::Verifier::clauses
 ///
 /// ```rust
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// use obsigil::{Issuer, MandateKey, NoApp, Verifier};
 /// let token = Issuer::new(MandateKey::from_bytes([42u8; 64])?)
-///     .mandate(&NoApp::default())
+///     .clauses(&NoApp::default())
 ///     .exp(4_000_000_000)
 ///     .subject("user-1")
 ///     .mint()?;
 /// let key = MandateKey::from_bytes([42u8; 64])?;
-/// let mandate = Verifier::new().key(&key).now(1_000_000_000)
-///     .verify::<NoApp>(&token)?;
-/// assert_eq!(mandate.exp(), 4_000_000_000);
-/// assert_eq!(mandate.subject(), Some("user-1"));
-/// assert_eq!(mandate.tid().get_version_num(), 7); // UUIDv7 (spec §11.3)
+/// let clauses = Verifier::new().key(&key).now(1_000_000_000)
+///     .clauses::<NoApp>(&token)?;
+/// assert_eq!(clauses.exp(), 4_000_000_000);
+/// assert_eq!(clauses.subject(), Some("user-1"));
+/// assert_eq!(clauses.tid().get_version_num(), 7); // UUIDv7 (the `tid` field, §8.2)
 /// # Ok(()) }
 /// ```
 #[derive(Debug)]
-pub struct Mandate<T> {
-    pub(crate) inner: Clauses<T>,
+pub struct Clauses<T> {
+    pub(crate) inner: MandateFields<T>,
 }
 
-impl<T> Mandate<T> {
-    /// Authoritative expiry (spec §11.1).
+impl<T> Clauses<T> {
+    /// Authoritative expiry (the `exp` field, §8.3).
     pub fn exp(&self) -> NumericDate {
         self.inner.exp.expect("verified mandate has exp")
     }
 
-    /// The unique token id (UUIDv7, spec §11.3).
+    /// The unique token id (UUIDv7, the `tid` field, §8.2).
     pub fn tid(&self) -> Uuid {
         self.inner.tid.expect("verified mandate has tid")
     }
 
-    /// Issue time, derived from `tid` (spec §11.3).
+    /// Issue time, derived from `tid` (the `tid` field, §8.2).
     pub fn issued_at(&self) -> NumericDate {
         tid_issued_at(self.tid())
     }
 
-    /// Issuer, for audit (spec §11.2).
+    /// Issuer, for audit (the `iss` field, §8.6).
     pub fn issuer(&self) -> Option<&str> {
         self.inner.iss.as_deref()
     }
 
-    /// Intended verifiers (spec §11.4).
+    /// Short alias for [`issuer`](Self::issuer).
+    pub fn iss(&self) -> Option<&str> {
+        self.issuer()
+    }
+
+    /// Intended verifiers (the `aud` field, §8.4).
     pub fn audience(&self) -> Option<&[String]> {
         self.inner.aud.as_deref()
     }
 
-    /// Subject authorized (spec §11.5).
+    /// Short alias for [`audience`](Self::audience).
+    pub fn aud(&self) -> Option<&[String]> {
+        self.audience()
+    }
+
+    /// Subject authorized (the `sub` field, §8.5).
     pub fn subject(&self) -> Option<&str> {
         self.inner.sub.as_deref()
+    }
+
+    /// Short alias for [`subject`](Self::subject).
+    pub fn sub(&self) -> Option<&str> {
+        self.subject()
     }
 
     /// The application clauses.
@@ -91,35 +106,42 @@ impl<T> Mandate<T> {
         &self.inner.app
     }
 
-    /// Consume the mandate, yielding the application clauses.
+    /// Consume the clauses, yielding the application value.
     pub fn into_app(self) -> T {
         self.inner.app
     }
 }
 
-/// A manifest's reserved claims plus the application value (spec §7, §11).
+/// A manifest's reserved claims plus the application value (the Serialization rules, §7; the Reserved fields section, §8).
 /// `iss` is required: a manifest lacking it is malformed and yields nothing
-/// (spec §11.2). `exp`, if present, is an advisory refresh hint.
+/// (the `iss` field, §8.6). `exp`, if present, is an advisory refresh hint. Internal
+/// backing for [`Claims`].
 #[derive(Debug)]
-pub(crate) struct Claims<T> {
+pub(crate) struct ManifestFields<T> {
     pub iss: String,
     pub exp: Option<NumericDate>,
     pub app: T,
 }
 
-/// An opened manifest. Advisory only — never authoritative (spec §9.6).
+/// An opened manifest's claims. Advisory only — never authoritative
+/// (the non-authoritative-manifest rule of the Security Considerations, §16.7).
 #[derive(Debug)]
-pub struct Manifest<T> {
-    pub(crate) inner: Claims<T>,
+pub struct Claims<T> {
+    pub(crate) inner: ManifestFields<T>,
 }
 
-impl<T> Manifest<T> {
-    /// Issuer, for display (spec §11.2).
+impl<T> Claims<T> {
+    /// Issuer, for display (the `iss` field, §8.6).
     pub fn issuer(&self) -> &str {
         &self.inner.iss
     }
 
-    /// Advisory refresh hint, if present (spec §11.1).
+    /// Short alias for [`issuer`](Self::issuer).
+    pub fn iss(&self) -> &str {
+        self.issuer()
+    }
+
+    /// Advisory refresh hint, if present (the `exp` field, §8.3).
     pub fn exp(&self) -> Option<NumericDate> {
         self.inner.exp
     }
@@ -129,7 +151,7 @@ impl<T> Manifest<T> {
         &self.inner.app
     }
 
-    /// Consume the manifest, yielding the application claims.
+    /// Consume the claims, yielding the application value.
     pub fn into_app(self) -> T {
         self.inner.app
     }

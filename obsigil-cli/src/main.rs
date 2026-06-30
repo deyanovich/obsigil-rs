@@ -1,15 +1,16 @@
 //! `obsigil` — command-line tool for the obsigil mandate-token format.
 //!
-//! High-level: `mint`, `verify`, `open-manifest`, `forward`. Byte-level
-//! conformance ops (spec §10): `seal`, `open`, `parse`. Keys are given as
-//! 128 hex chars or a published-test-key keyword: `mandate` (the secret test
-//! key, SHA-512("obsigil test mandate key v1")) wherever a key is taken, and
-//! `manifest` (the public manifest key from the spec) for the byte-level
-//! `seal`/`open` ops only — `mint`/`verify` reject it as a mandate key
-//! (spec §4.1).
+//! High-level: `mint`, `clauses` (verify), `claims` (read the manifest),
+//! `mandate` and `manifest` (carve out a forwardable half), `generate-key`.
+//! Byte-level conformance ops (the Conformance and test vectors section, §13): `seal`, `open`, `parse`. Keys are
+//! given as 128 hex chars or a published-test-key keyword: `mandate` (the
+//! secret test key, SHA-512("obsigil test mandate key v1")) wherever a key is
+//! taken, and `manifest` (the public manifest key from the spec) for the
+//! byte-level `seal`/`open` ops only — `mint`/`clauses` reject it as a
+//! mandate key (the mandate construction, §5.1).
 //!
-//! Exit codes: 0 success; 1 operation rejected (verify/open/parse failure —
-//! uniform, per spec §9.5); 2 usage error.
+//! Exit codes: 0 success; 1 operation rejected (verify/read/parse failure —
+//! uniform, per the uniform-failure rule of the Security Considerations, §16.6); 2 usage error.
 
 use std::io::Read;
 use std::process::ExitCode;
@@ -17,11 +18,11 @@ use std::time::Duration;
 
 use clap::{Args, Parser, Subcommand};
 use obsigil::lowlevel::{self, Alg, Encoding};
-use obsigil::{open_manifest, Issuer, MandateKey, Uuid, Verifier};
+use obsigil::{Issuer, MandateKey, Uuid, Verifier};
 use serde_json::{json, Value};
 
 /// The published test mandate key: SHA-512("obsigil test mandate key v1"),
-/// distinct from the manifest key (spec §4.1). Used by `--key mandate`.
+/// distinct from the manifest key (the mandate construction, §5.1). Used by `--key mandate`.
 const MANDATE_TEST_KEY_HEX: &str =
     "a341adc813cfa493412cda5900fa4ec83f20a6cdea4fe5c759f7ccdb7ffbec51\
 e01d2ce90c592909adb2ac1cad771790353f439ac86e9b113a17f7c57f0684b0";
@@ -40,11 +41,15 @@ enum Cmd {
     /// Mint a token from clauses (and optionally a manifest).
     Mint(MintArgs),
     /// Verify a token's mandate; prints clauses JSON or exits 1.
-    Verify(VerifyArgs),
-    /// Open a token's manifest (keyless, advisory); prints claims JSON.
-    OpenManifest(TokenArg),
-    /// Print the forwardable `.0mandate` form of a token.
-    Forward(TokenArg),
+    Clauses(VerifyArgs),
+    /// Read a token's manifest (keyless, advisory); prints claims JSON.
+    Claims(TokenArg),
+    /// Print the forwardable `.0mandate` half of a token.
+    Mandate(TokenArg),
+    /// Print the standalone `manifest0.` half of a token.
+    Manifest(TokenArg),
+    /// Generate a fresh 64-byte mandate key as 128 hex chars.
+    GenerateKey,
     /// Seal raw octets (hex) into a half ciphertext (conformance).
     Seal(SealArgs),
     /// Open a half ciphertext back to raw octets (hex) (conformance).
@@ -168,9 +173,11 @@ fn main() -> ExitCode {
 fn run(cli: Cli) -> Result<ExitCode, String> {
     match cli.cmd {
         Cmd::Mint(a) => cmd_mint(a),
-        Cmd::Verify(a) => cmd_verify(a),
-        Cmd::OpenManifest(a) => cmd_open_manifest(a),
-        Cmd::Forward(a) => cmd_forward(a),
+        Cmd::Clauses(a) => cmd_clauses(a),
+        Cmd::Claims(a) => cmd_claims(a),
+        Cmd::Mandate(a) => cmd_mandate(a),
+        Cmd::Manifest(a) => cmd_manifest(a),
+        Cmd::GenerateKey => cmd_generate_key(),
         Cmd::Seal(a) => cmd_seal(a),
         Cmd::Open(a) => cmd_open(a),
         Cmd::Parse(a) => cmd_parse(a),
@@ -187,7 +194,7 @@ fn cmd_mint(a: MintArgs) -> Result<ExitCode, String> {
     let fields = read_input(a.fields.as_deref().unwrap_or("{}"))?;
     let app: Value = serde_json::from_str(&fields).map_err(|e| format!("--fields: {e}"))?;
 
-    let mut b = issuer.mandate(&app);
+    let mut b = issuer.clauses(&app);
     b = match (a.exp, a.ttl) {
         (Some(exp), _) => b.exp(exp),
         (None, Some(ttl)) => b.expires_in(Duration::from_secs(ttl)),
@@ -219,7 +226,7 @@ fn cmd_mint(a: MintArgs) -> Result<ExitCode, String> {
     Ok(ExitCode::SUCCESS)
 }
 
-fn cmd_verify(a: VerifyArgs) -> Result<ExitCode, String> {
+fn cmd_clauses(a: VerifyArgs) -> Result<ExitCode, String> {
     let token = read_input(&a.token)?;
     if a.key.is_empty() {
         return Err("at least one --key is required".into());
@@ -241,7 +248,7 @@ fn cmd_verify(a: VerifyArgs) -> Result<ExitCode, String> {
         v = v.now(now);
     }
 
-    match v.verify::<Value>(&token) {
+    match v.clauses::<Value>(&token) {
         Ok(m) => {
             let out = json!({
                 "exp": m.exp(),
@@ -268,9 +275,9 @@ fn cmd_verify(a: VerifyArgs) -> Result<ExitCode, String> {
     }
 }
 
-fn cmd_open_manifest(a: TokenArg) -> Result<ExitCode, String> {
+fn cmd_claims(a: TokenArg) -> Result<ExitCode, String> {
     let token = read_input(&a.token)?;
-    match open_manifest::<Value>(&token) {
+    match obsigil::claims::<Value>(&token) {
         Some(m) => {
             let out = json!({ "iss": m.issuer(), "exp": m.exp(), "app": m.app() });
             println!(
@@ -283,15 +290,36 @@ fn cmd_open_manifest(a: TokenArg) -> Result<ExitCode, String> {
     }
 }
 
-fn cmd_forward(a: TokenArg) -> Result<ExitCode, String> {
+fn cmd_mandate(a: TokenArg) -> Result<ExitCode, String> {
     let token = read_input(&a.token)?;
-    match lowlevel::parse(&token) {
-        Some(p) if p.mandate.is_some() => {
-            println!("{}{}", p.separator, p.mandate_part);
+    match obsigil::mandate(&token) {
+        Some(half) => {
+            println!("{half}");
             Ok(ExitCode::SUCCESS)
         }
-        _ => Ok(ExitCode::FAILURE),
+        None => Ok(ExitCode::FAILURE),
     }
+}
+
+fn cmd_manifest(a: TokenArg) -> Result<ExitCode, String> {
+    let token = read_input(&a.token)?;
+    match obsigil::manifest(&token) {
+        Some(half) => {
+            println!("{half}");
+            Ok(ExitCode::SUCCESS)
+        }
+        None => Ok(ExitCode::FAILURE),
+    }
+}
+
+fn cmd_generate_key() -> Result<ExitCode, String> {
+    // The library's `generate_key()` deliberately never exposes its bytes;
+    // the CLI must emit a provisioning key, so it draws the 64 bytes from the
+    // platform CSPRNG directly and hex-encodes them (the mandate construction, §5.1).
+    let mut bytes = [0u8; 64];
+    getrandom::getrandom(&mut bytes).map_err(|e| format!("platform CSPRNG unavailable: {e}"))?;
+    println!("{}", lowlevel::encode(&bytes, Encoding::Hex));
+    Ok(ExitCode::SUCCESS)
 }
 
 fn cmd_seal(a: SealArgs) -> Result<ExitCode, String> {

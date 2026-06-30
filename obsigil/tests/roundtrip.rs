@@ -1,10 +1,10 @@
-//! Integration tests over the public API (spec §10): a positive round-trip
+//! Integration tests over the public API (the Conformance and test vectors section, §13): a positive round-trip
 //! and the required negative cases.
 
 use std::time::Duration;
 
 use obsigil::{
-    open_manifest, Issuer, Mandate, MandateKey, Manifest, MintError, NoApp, Reason, Uuid, Verifier,
+    claims, Claims, Clauses, Issuer, MandateKey, MintError, NoApp, Reason, Uuid, Verifier,
 };
 use serde::{Deserialize, Serialize};
 
@@ -26,7 +26,7 @@ fn issuer() -> Issuer {
 
 fn full_token() -> String {
     issuer()
-        .mandate(&Access {
+        .clauses(&Access {
             role: "admin".into(),
         })
         .exp(4_000_000_000)
@@ -47,16 +47,19 @@ fn full_token_round_trips() {
     let token = full_token();
 
     // Front-end advisory view (keyless).
-    let manifest: Manifest<Display> = open_manifest(&token).unwrap();
-    assert_eq!(manifest.issuer(), "auth.example");
-    assert_eq!(manifest.app().theme, "dark");
+    let advisory: Claims<Display> = claims(&token).unwrap();
+    assert_eq!(advisory.issuer(), "auth.example");
+    assert_eq!(advisory.iss(), "auth.example"); // short alias
+    assert_eq!(advisory.app().theme, "dark");
 
     // Backend verification (authoritative).
     let key = MandateKey::from_bytes(KEY_BYTES).unwrap();
     let verifier = Verifier::new().key(&key).audience("api").now(1_000_000_000);
-    let mandate: Mandate<Access> = verifier.verify(&token).unwrap();
+    let mandate: Clauses<Access> = verifier.clauses(&token).unwrap();
     assert_eq!(mandate.app().role, "admin");
     assert_eq!(mandate.subject(), Some("u42"));
+    assert_eq!(mandate.sub(), Some("u42")); // short alias
+    assert_eq!(mandate.aud(), Some(&["api".to_string()][..])); // short alias
     assert_eq!(mandate.exp(), 4_000_000_000);
     assert_eq!(mandate.tid().get_version_num(), 7);
 }
@@ -65,12 +68,12 @@ fn full_token_round_trips() {
 fn verifies_the_forwarded_mandate_only_form() {
     let token = full_token();
     let sep = token.find(['.', '~']).unwrap();
-    let forwarded = &token[sep..]; // ".0<mandate>" — the §8 forward form
+    let forwarded = &token[sep..]; // ".0<mandate>" — the Audiences forward form (§9)
     assert!(forwarded.starts_with('.'));
 
     let key = MandateKey::from_bytes(KEY_BYTES).unwrap();
     let verifier = Verifier::new().key(&key).audience("api").now(1_000_000_000);
-    assert!(verifier.verify::<Access>(forwarded).is_ok());
+    assert!(verifier.clauses::<Access>(forwarded).is_ok());
 }
 
 #[test]
@@ -82,7 +85,7 @@ fn trial_decryption_accepts_the_matching_key() {
         .keys([&wrong, &right])
         .audience("api")
         .now(1_000_000_000);
-    assert!(verifier.verify::<Access>(&token).is_ok());
+    assert!(verifier.clauses::<Access>(&token).is_ok());
 }
 
 #[test]
@@ -93,7 +96,7 @@ fn rejects_uniformly_with_internal_reasons() {
 
     // expired
     let v = Verifier::new().key(&key).audience("api").now(4_000_000_001);
-    let e = v.verify::<Access>(&token).unwrap_err();
+    let e = v.clauses::<Access>(&token).unwrap_err();
     assert_eq!(e.reason(), Reason::Expired);
     assert_eq!(e.to_string(), "obsigil: token rejected"); // uniform Display
 
@@ -103,14 +106,14 @@ fn rejects_uniformly_with_internal_reasons() {
         .audience("other")
         .now(1_000_000_000);
     assert_eq!(
-        v.verify::<Access>(&token).unwrap_err().reason(),
+        v.clauses::<Access>(&token).unwrap_err().reason(),
         Reason::AudienceMismatch
     );
 
     // aud present but verifier has none
     let v = Verifier::new().key(&key).now(1_000_000_000);
     assert_eq!(
-        v.verify::<Access>(&token).unwrap_err().reason(),
+        v.clauses::<Access>(&token).unwrap_err().reason(),
         Reason::AudienceMismatch
     );
 
@@ -120,14 +123,14 @@ fn rejects_uniformly_with_internal_reasons() {
         .audience("api")
         .now(1_000_000_000);
     assert_eq!(
-        v.verify::<Access>(&token).unwrap_err().reason(),
+        v.clauses::<Access>(&token).unwrap_err().reason(),
         Reason::AuthFailed
     );
 
     // malformed
     let v = Verifier::new().key(&key).now(1_000_000_000);
     assert_eq!(
-        v.verify::<Access>("garbage").unwrap_err().reason(),
+        v.clauses::<Access>("garbage").unwrap_err().reason(),
         Reason::Malformed
     );
 }
@@ -170,13 +173,13 @@ fn verifier_rejects_malformed_tid() {
         Verifier::new()
             .key(&key)
             .now(1_000_000_000)
-            .verify::<NoApp>(&token)
+            .clauses::<NoApp>(&token)
             .unwrap_err()
             .reason()
     };
     // Wrong version (nil UUID, version 0).
     assert_eq!(reason("00000000-0000-0000-0000-000000000000"), Reason::BadTid);
-    // Version 7 but a non-RFC-4122 variant (NCS, nibble 0) — spec §12.3.
+    // Version 7 but a non-RFC-4122 variant (NCS, nibble 0) — the `tid` field (§8.2).
     assert_eq!(reason("019ed29a-378d-72f0-0462-4929cd2bfcad"), Reason::BadTid);
     // A well-formed v7 tid verifies.
     let good = craft(vec![
@@ -186,7 +189,7 @@ fn verifier_rejects_malformed_tid() {
     assert!(Verifier::new()
         .key(&key)
         .now(1_000_000_000)
-        .verify::<NoApp>(&good)
+        .clauses::<NoApp>(&good)
         .is_ok());
 }
 
@@ -199,7 +202,7 @@ fn verifier_rejects_noncanonical_cbor() {
         Verifier::new()
             .key(&key)
             .now(1_000_000_000)
-            .verify::<NoApp>(&craft(entries))
+            .clauses::<NoApp>(&craft(entries))
             .unwrap_err()
             .reason()
     };
@@ -228,12 +231,75 @@ fn verifier_rejects_noncanonical_cbor() {
     );
 }
 
+// Rule 6 (the Serialization rules, §7): a CBOR text string carrying invalid UTF-8 is rejected.
+// Asserted explicitly — hand-encoded, since ciborium's `Value::Text` is a
+// Rust `String` and cannot represent invalid UTF-8 — so the property does not
+// silently rest on whatever ciborium happens to do today.
+#[cfg(feature = "conformance")]
+#[test]
+fn rejects_invalid_utf8_text_string() {
+    use obsigil::lowlevel::{self, Alg, Encoding};
+    let key = MandateKey::from_bytes(KEY_BYTES).unwrap();
+    // Raw CBOR for the map {0: "<0xff>"}: A1 (map, 1 pair), 00 (key int 0),
+    // 61 FF (text string, length 1, content byte 0xFF — not valid UTF-8).
+    let octets = [0xA1u8, 0x00, 0x61, 0xFF];
+    let sealed = lowlevel::seal(&octets, &KEY_BYTES, Alg::Siv).unwrap();
+    let token = format!(".0{}", lowlevel::encode(&sealed, Encoding::B64));
+
+    // Authenticates under the right key, but the plaintext is not valid CBOR
+    // (the text string's bytes are not UTF-8), so both the enforcing and the
+    // diagnostic decode terminals reject it.
+    let v = Verifier::new().key(&key).now(1_000_000_000);
+    assert_eq!(v.clauses::<NoApp>(&token).unwrap_err().reason(), Reason::Malformed);
+    assert_eq!(
+        v.clauses_unchecked::<NoApp>(&token).unwrap_err().reason(),
+        Reason::Malformed
+    );
+}
+
+// The Serialization rules (§7): a CBOR map key that is not an integer or text string is rejected at
+// EVERY map depth, not just the half's top-level map. Go cannot represent a
+// byte-slice map key, so a *nested* map with one is a token no conformant
+// verifier could decode. Hand-sealed because the property is on a key type
+// minting never emits (ciborium's `Value::Map` can carry a `Value::Bytes` key,
+// but the mint path never produces one) — so it rests on exact crafted octets.
+#[cfg(feature = "conformance")]
+#[test]
+fn rejects_nested_byte_string_map_key() {
+    use obsigil::lowlevel::{self, Alg, Encoding};
+    let key = MandateKey::from_bytes(KEY_BYTES).unwrap();
+    // map(3) { 0: {h'00': 1}, -1: <16-byte v7 tid>, -2: 4000000000 }. The
+    // application value under key 0 is a nested map whose sole key is the
+    // 1-byte byte string 0x00 — a disallowed map-key type at depth. The
+    // top-level keys (0, -1, -2) are all valid integers, so the violation is
+    // reachable only by recursing into the application value.
+    let octets: [u8; 30] = [
+        0xA3, 0x00, 0xA1, 0x41, 0x00, 0x01, 0x20, 0x50, 0x01, 0x9E, //
+        0xD2, 0x9A, 0x37, 0x8D, 0x72, 0xF0, 0xB4, 0x62, 0x49, 0x29, //
+        0xCD, 0x2B, 0xFC, 0xAD, 0x21, 0x1A, 0xEE, 0x6B, 0x28, 0x00, //
+    ];
+    let sealed = lowlevel::seal(&octets, &KEY_BYTES, Alg::Siv).unwrap();
+    let token = format!(".0{}", lowlevel::encode(&sealed, Encoding::B64));
+
+    // Authenticates under the right key, but the nested byte-string key is a
+    // disallowed map-key type, so both decode terminals reject it.
+    let v = Verifier::new().key(&key).now(1_000_000_000);
+    assert_eq!(
+        v.clauses::<NoApp>(&token).unwrap_err().reason(),
+        Reason::NonCanonical
+    );
+    assert_eq!(
+        v.clauses_unchecked::<NoApp>(&token).unwrap_err().reason(),
+        Reason::NonCanonical
+    );
+}
+
 #[test]
 fn leeway_is_capped_at_the_maximum() {
     // exp far in the past relative to `now`; a leeway beyond the 60s cap must
-    // not resurrect it (spec §9.9: leeway is bounded by a configured maximum).
+    // not resurrect it (the Limits and robustness rules, §16.10: leeway is bounded by a configured maximum).
     let token = issuer()
-        .mandate(&NoApp::default())
+        .clauses(&NoApp::default())
         .exp(1_000)
         .mint()
         .unwrap();
@@ -244,21 +310,21 @@ fn leeway_is_capped_at_the_maximum() {
         .key(&key)
         .now(1_000_000_000)
         .leeway(Duration::from_secs(9_999_999_999));
-    assert_eq!(v.verify::<NoApp>(&token).unwrap_err().reason(), Reason::Expired);
+    assert_eq!(v.clauses::<NoApp>(&token).unwrap_err().reason(), Reason::Expired);
 
     // Within the cap, leeway still works (exp 1000 + 60 > now 1030).
     let v = Verifier::new()
         .key(&key)
         .now(1_030)
         .leeway(Duration::from_secs(60));
-    assert!(v.verify::<NoApp>(&token).is_ok());
+    assert!(v.clauses::<NoApp>(&token).is_ok());
 
     // Just past the cap (exp 1000 + 60 <= now 1061) is rejected.
     let v = Verifier::new()
         .key(&key)
         .now(1_061)
         .leeway(Duration::from_secs(60));
-    assert_eq!(v.verify::<NoApp>(&token).unwrap_err().reason(), Reason::Expired);
+    assert_eq!(v.clauses::<NoApp>(&token).unwrap_err().reason(), Reason::Expired);
 }
 
 #[test]
@@ -266,7 +332,7 @@ fn mint_rejects_non_uuidv7_tid() {
     // Wrong version (v4) is rejected at mint, not left for the verifier.
     let v4 = Uuid::parse_str("00000000-0000-4000-8000-000000000000").unwrap();
     let err = issuer()
-        .mandate(&NoApp::default())
+        .clauses(&NoApp::default())
         .exp(4_000_000_000)
         .tid(v4)
         .mint()
@@ -276,7 +342,7 @@ fn mint_rejects_non_uuidv7_tid() {
     // Version 7 but a non-RFC-4122 variant (NCS, nibble 0) is also rejected.
     let bad_variant = Uuid::parse_str("019ed29a-378d-72f0-0462-4929cd2bfcad").unwrap();
     let err = issuer()
-        .mandate(&NoApp::default())
+        .clauses(&NoApp::default())
         .exp(4_000_000_000)
         .tid(bad_variant)
         .mint()
@@ -286,7 +352,7 @@ fn mint_rejects_non_uuidv7_tid() {
     // A well-formed v7 tid still mints.
     let good = Uuid::parse_str("019ed29a-378d-72f0-b462-4929cd2bfcad").unwrap();
     assert!(issuer()
-        .mandate(&NoApp::default())
+        .clauses(&NoApp::default())
         .exp(4_000_000_000)
         .tid(good)
         .mint()
@@ -297,7 +363,7 @@ fn mint_rejects_non_uuidv7_tid() {
 fn expires_in_saturates_instead_of_overflowing() {
     // A gigantic TTL must neither panic (debug) nor wrap to a past exp.
     let token = issuer()
-        .mandate(&NoApp::default())
+        .clauses(&NoApp::default())
         .expires_in(Duration::from_secs(u64::MAX))
         .mint()
         .unwrap();
@@ -305,7 +371,7 @@ fn expires_in_saturates_instead_of_overflowing() {
     assert!(Verifier::new()
         .key(&key)
         .now(1_000_000_000)
-        .verify::<NoApp>(&token)
+        .clauses::<NoApp>(&token)
         .is_ok());
 }
 
@@ -317,7 +383,7 @@ fn rejects_oversize_mandate_half() {
     }
     // App data large enough that the decoded half exceeds the 64 KiB default.
     let token = Issuer::new(MandateKey::from_bytes(KEY_BYTES).unwrap())
-        .mandate(&Big {
+        .clauses(&Big {
             blob: "x".repeat(100 * 1024),
         })
         .exp(4_000_000_000)
@@ -327,25 +393,34 @@ fn rejects_oversize_mandate_half() {
 
     // Default cap rejects it uniformly (before any trial decryption).
     let v = Verifier::new().key(&key).now(1_000_000_000);
-    assert_eq!(v.verify::<Big>(&token).unwrap_err().reason(), Reason::Malformed);
+    assert_eq!(v.clauses::<Big>(&token).unwrap_err().reason(), Reason::Malformed);
 
     // A raised cap admits the same token.
     let v = Verifier::new()
         .key(&key)
         .now(1_000_000_000)
         .max_decoded_len(1024 * 1024);
-    assert!(v.verify::<Big>(&token).is_ok());
+    assert!(v.clauses::<Big>(&token).is_ok());
 }
 
 #[test]
 fn mandate_only_token_has_no_manifest() {
     let token = issuer()
-        .mandate(&NoApp::default())
+        .clauses(&NoApp::default())
         .exp(4_000_000_000)
         .mint()
         .unwrap();
     assert!(token.starts_with('.')); // no manifest half
-    assert!(open_manifest::<NoApp>(&token).is_none());
+    assert!(claims::<NoApp>(&token).is_none());
+    assert!(obsigil::manifest(&token).is_none()); // no standalone manifest half
+    // ...but the mandate half carves out and re-verifies on its own.
+    let forwarded = obsigil::mandate(&token).expect("has a mandate half");
+    let key = MandateKey::from_bytes(KEY_BYTES).unwrap();
+    assert!(Verifier::new()
+        .key(&key)
+        .now(1_000_000_000)
+        .clauses::<NoApp>(&forwarded)
+        .is_ok());
 }
 
 #[test]

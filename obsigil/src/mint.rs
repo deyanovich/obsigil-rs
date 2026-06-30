@@ -1,4 +1,4 @@
-//! Minting — the trusted issuer side (spec §4). Configure an [`Issuer`]
+//! Minting — the trusted issuer side (the Construction section, §5). Configure an [`Issuer`]
 //! once with the secret key and defaults, mint many tokens. Errors are
 //! descriptive: minting is not bearer-facing, so detail is not an oracle.
 
@@ -33,7 +33,7 @@ impl Issuer {
     /// use obsigil::{Issuer, MandateKey, NoApp};
     /// let key = MandateKey::from_bytes([42u8; 64])?;
     /// let token = Issuer::new(key)
-    ///     .mandate(&NoApp::default())
+    ///     .clauses(&NoApp::default())
     ///     .exp(4_000_000_000)
     ///     .mint()?;
     /// assert!(token.starts_with('.')); // mandate-only: no manifest half
@@ -68,7 +68,7 @@ impl Issuer {
 
     /// Begin minting a mandate carrying the application clauses `app`. Use
     /// [`crate::NoApp`] for a mandate with only reserved clauses.
-    pub fn mandate<'a, T: Serialize>(&'a self, app: &'a T) -> MintBuilder<'a, T> {
+    pub fn clauses<'a, T: Serialize>(&'a self, app: &'a T) -> MintBuilder<'a, T> {
         MintBuilder {
             issuer: self,
             app,
@@ -83,7 +83,7 @@ impl Issuer {
 }
 
 /// Builder for a single token. `exp` is required; `tid` defaults to a fresh
-/// UUIDv7 (spec §11.3).
+/// UUIDv7 (the `tid` field, §8.2).
 pub struct MintBuilder<'a, T> {
     issuer: &'a Issuer,
     app: &'a T,
@@ -96,24 +96,24 @@ pub struct MintBuilder<'a, T> {
 }
 
 impl<'a, T: Serialize> MintBuilder<'a, T> {
-    /// Set the authoritative expiry as an absolute NumericDate (spec §11.1).
+    /// Set the authoritative expiry as an absolute NumericDate (the `exp` field, §8.3).
     pub fn exp(mut self, exp: NumericDate) -> Self {
         self.exp = Some(exp);
         self
     }
 
-    /// Set the expiry as a duration from now (spec §11.1).
+    /// Set the expiry as a duration from now (the `exp` field, §8.3).
     ///
     /// ```rust
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use std::time::Duration;
     /// use obsigil::{Issuer, MandateKey, NoApp, Verifier};
     /// let token = Issuer::new(MandateKey::from_bytes([42u8; 64])?)
-    ///     .mandate(&NoApp::default())
+    ///     .clauses(&NoApp::default())
     ///     .expires_in(Duration::from_secs(3600)) // valid for one hour
     ///     .mint()?;
     /// let key = MandateKey::from_bytes([42u8; 64])?;
-    /// assert!(Verifier::new().key(&key).verify::<NoApp>(&token).is_ok());
+    /// assert!(Verifier::new().key(&key).clauses::<NoApp>(&token).is_ok());
     /// # Ok(()) }
     /// ```
     pub fn expires_in(mut self, ttl: Duration) -> Self {
@@ -126,35 +126,35 @@ impl<'a, T: Serialize> MintBuilder<'a, T> {
         self
     }
 
-    /// Override the auto-generated UUIDv7 `tid` (spec §11.3).
+    /// Override the auto-generated UUIDv7 `tid` (the `tid` field, §8.2).
     pub fn tid(mut self, tid: Uuid) -> Self {
         self.tid = Some(tid);
         self
     }
 
-    /// Set the mandate's `iss` clause, for audit (spec §11.2).
+    /// Set the mandate's `iss` clause, for audit (the `iss` field, §8.6).
     pub fn issuer(mut self, iss: impl Into<String>) -> Self {
         self.iss = Some(iss.into());
         self
     }
 
-    /// Set the `aud` clause — the intended verifiers (spec §11.4). Must be
+    /// Set the `aud` clause — the intended verifiers (the `aud` field, §8.4). Must be
     /// non-empty.
     ///
     /// ```rust
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use obsigil::{Issuer, MandateKey, NoApp, Verifier};
     /// let token = Issuer::new(MandateKey::from_bytes([42u8; 64])?)
-    ///     .mandate(&NoApp::default())
+    ///     .clauses(&NoApp::default())
     ///     .exp(4_000_000_000)
     ///     .audience(["api", "admin-api"])
     ///     .mint()?;
     /// let key = MandateKey::from_bytes([42u8; 64])?;
     /// // A verifier in the audience succeeds; one outside fails.
     /// assert!(Verifier::new().key(&key).audience("api").now(1_000_000_000)
-    ///     .verify::<NoApp>(&token).is_ok());
+    ///     .clauses::<NoApp>(&token).is_ok());
     /// assert!(Verifier::new().key(&key).audience("other").now(1_000_000_000)
-    ///     .verify::<NoApp>(&token).is_err());
+    ///     .clauses::<NoApp>(&token).is_err());
     /// # Ok(()) }
     /// ```
     pub fn audience<I, S>(mut self, audiences: I) -> Self
@@ -166,34 +166,34 @@ impl<'a, T: Serialize> MintBuilder<'a, T> {
         self
     }
 
-    /// Set the `sub` clause — the subject authorized (spec §11.5).
+    /// Set the `sub` clause — the subject authorized (the `sub` field, §8.5).
     pub fn subject(mut self, sub: impl Into<String>) -> Self {
         self.sub = Some(sub.into());
         self
     }
 
     /// Attach a public manifest half with the required `iss` claim and the
-    /// application claims `claims` (spec §4.2, §11.2). Sealed keyless under
+    /// application claims `claims` (the manifest construction, §5.2; the `iss` field, §8.6). Sealed keyless under
     /// the public manifest key.
     ///
     /// ```rust
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// use obsigil::{open_manifest, Issuer, MandateKey, Manifest, NoApp};
+    /// use obsigil::{claims, Claims, Issuer, MandateKey, NoApp};
     /// use serde::{Deserialize, Serialize};
     ///
     /// #[derive(Serialize, Deserialize)]
     /// struct Ui { theme: String }
     ///
     /// let token = Issuer::new(MandateKey::from_bytes([42u8; 64])?)
-    ///     .mandate(&NoApp::default())
+    ///     .clauses(&NoApp::default())
     ///     .exp(4_000_000_000)
     ///     .manifest("auth.example", &Ui { theme: "dark".into() })
     ///     .mint()?;
     ///
-    /// // Opens with no secret — advisory only (spec §9.6).
-    /// let manifest: Manifest<Ui> = open_manifest(&token).expect("present");
-    /// assert_eq!(manifest.issuer(), "auth.example");
-    /// assert_eq!(manifest.app().theme, "dark");
+    /// // Reads with no secret — advisory only (the non-authoritative-manifest rule of the Security Considerations, §16.7).
+    /// let advisory: Claims<Ui> = claims(&token).expect("present");
+    /// assert_eq!(advisory.issuer(), "auth.example");
+    /// assert_eq!(advisory.app().theme, "dark");
     /// # Ok(()) }
     /// ```
     pub fn manifest<M: Serialize>(mut self, iss: impl Into<String>, claims: &M) -> Self {
@@ -201,7 +201,7 @@ impl<'a, T: Serialize> MintBuilder<'a, T> {
         self
     }
 
-    /// Mint the token (spec §3, §4). Errors if `exp` is unset, `aud` is
+    /// Mint the token (the Token structure section, §4; the Construction section, §5). Errors if `exp` is unset, `aud` is
     /// empty, or a chosen algorithm/serialization is not built in.
     pub fn mint(self) -> Result<String, MintError> {
         let exp = self.exp.ok_or(MintError::Missing("exp"))?;
@@ -212,7 +212,7 @@ impl<'a, T: Serialize> MintBuilder<'a, T> {
         }
         let tid = self.tid.unwrap_or_else(Uuid::now_v7);
         // A provided `tid` must be a well-formed UUIDv7 — version 7 and the RFC
-        // 4122 variant (spec §12.3); the auto-generated one always is. Catching
+        // 4122 variant (the `tid` field, §8.2); the auto-generated one always is. Catching
         // it here stops any front-end from minting a token the verifier would
         // only reject later.
         if tid.get_version_num() != 7 || tid.get_variant() != uuid::Variant::RFC4122 {
@@ -236,7 +236,7 @@ impl<'a, T: Serialize> MintBuilder<'a, T> {
             None => None,
         };
 
-        // Assemble the token in a single allocation (spec §3):
+        // Assemble the token in a single allocation (the Token structure section, §4):
         //   [ manifest_text manifest_code ] SEP mandate_code mandate_text
         let enc = self.issuer.encoding;
         let cap = manifest_sealed

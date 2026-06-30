@@ -13,24 +13,24 @@
 //! ```
 //!
 //! This crate is the **backend** side: an [`Issuer`] mints mandates under
-//! a secret [`MandateKey`], and [`Verifier::verify`] checks them against the
-//! reserved fields (spec §11). The manifest is keyless and advisory; open
-//! it with [`open_manifest`]. Verification is symmetric — the same
+//! a secret [`MandateKey`], and [`Verifier::clauses`] checks them against the
+//! reserved fields (the Reserved fields section, §8). The manifest is keyless and advisory; read
+//! its [`claims`] with no secret. Verification is symmetric — the same
 //! [`MandateKey`] both mints and verifies — so obsigil fits shared-secret
 //! (HS256-style) JWT and JWE use cases, not public-key verification.
 //!
 //! Built directly on RustCrypto (`aes-siv`, `aes-gcm-siv`, `hkdf`). Only
 //! authenticated AEADs are ever compiled in, so an unauthenticated mandate
-//! is structurally unrepresentable (spec §9.2).
+//! is structurally unrepresentable (the mandate-must-be-authenticated rule of the Security Considerations, §16.2).
 //!
 //! The normative format is the obsigil specification; section references in
-//! this source (e.g. `spec §5.2`) point there.
+//! this source (e.g. the manifest construction, §5.2) point there.
 //!
 //! # Example
 //!
 //! ```rust
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! use obsigil::{open_manifest, Issuer, Mandate, MandateKey, Manifest, Verifier};
+//! use obsigil::{claims, generate_key, Claims, Clauses, Issuer, MandateKey, Verifier};
 //! use serde::{Deserialize, Serialize};
 //!
 //! #[derive(Serialize, Deserialize)]
@@ -39,30 +39,32 @@
 //! struct Ui { theme: String }
 //!
 //! // One 64-byte secret, provisioned to both sides (use
-//! // `MandateKey::generate()` in production).
+//! // `generate_key()` in production).
+//! # let _ = generate_key;
 //! let issuer_key = MandateKey::from_bytes([42u8; 64])?;
 //!
-//! // Issuer: an authoritative mandate plus an advisory public manifest.
+//! // Issuer: mint a token. The mandate carries the authoritative clauses;
+//! // the optional manifest carries advisory claims.
 //! let token = Issuer::new(issuer_key)
-//!     .mandate(&Access { role: "admin".into() })
+//!     .clauses(&Access { role: "admin".into() })
 //!     .exp(4_000_000_000)
 //!     .audience(["api"])
 //!     .manifest("auth.example", &Ui { theme: "dark".into() })
 //!     .mint()?;
 //!
-//! // Front end: read the manifest with no secret (advisory only).
-//! let manifest: Manifest<Ui> = open_manifest(&token).expect("present");
-//! assert_eq!(manifest.issuer(), "auth.example");
+//! // Front end: read the manifest's claims with no secret (advisory only).
+//! let advisory: Claims<Ui> = claims(&token).expect("present");
+//! assert_eq!(advisory.issuer(), "auth.example");
 //!
-//! // Backend: verify the mandate (authoritative). `now` is pinned here
-//! // for a deterministic example; omit it to read the system clock.
+//! // Backend: verify the mandate's clauses (authoritative). `now` is pinned
+//! // here for a deterministic example; omit it to read the system clock.
 //! let verify_key = MandateKey::from_bytes([42u8; 64])?;
-//! let mandate: Mandate<Access> = Verifier::new()
+//! let clauses: Clauses<Access> = Verifier::new()
 //!     .key(&verify_key)
 //!     .audience("api")
 //!     .now(1_000_000_000)
-//!     .verify(&token)?;
-//! assert_eq!(mandate.app().role, "admin");
+//!     .clauses(&token)?;
+//! assert_eq!(clauses.app().role, "admin");
 //! # Ok(()) }
 //! ```
 
@@ -81,11 +83,13 @@ mod verify;
 pub mod lowlevel;
 
 pub use error::{Error, KeyError, MintError, Reason};
-pub use key::MandateKey;
+pub use key::{generate_key, MandateKey};
 pub use mint::{Issuer, MintBuilder};
-pub use reserved::{Mandate, Manifest, NoApp};
+pub use reserved::{Claims, Clauses, NoApp};
 pub use types::{tid_issued_at, Alg, Encoding, NumericDate, MANIFEST_KEY};
-pub use verify::{open_manifest, Verifier};
+pub use verify::{
+    authorization_header, claims, mandate, manifest, manifest_plaintext, Verifier,
+};
 
-// Re-exported for callers handling `tid` (spec §11.3).
+// Re-exported for callers handling `tid` (the `tid` field, §8.2).
 pub use uuid::Uuid;
