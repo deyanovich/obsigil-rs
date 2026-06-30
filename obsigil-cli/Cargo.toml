@@ -2,7 +2,7 @@
 name = "obsigil-cli"
 version = "0.3.0"
 edition = "2021"
-rust-version = "1.83.0"
+rust-version = "1.85.0"
 license = "MIT OR Apache-2.0"
 description = "Command-line tool for the obsigil mandate-token format: mint, verify, open, forward, and the byte-level conformance ops"
 repository = "https://gitlab.com/obsigil/obsigil-rs"

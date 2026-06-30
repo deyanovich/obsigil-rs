@@ -62,11 +62,12 @@ fmt:
     - rustup component add rustfmt
     - cargo fmt --all -- --check
 
-# Validates the declared MSRV (rust-version = 1.83.0). Required — a
-# failure means the declared floor is no longer honest.
+# Validates the declared MSRV (rust-version = 1.85.0). Required — a
+# failure means the declared floor is no longer honest. The 1.85 floor is
+# set by zeroize_derive (edition 2024), pulled via zeroize's derive feature.
 msrv:
   stage: test
-  image: rust:1.83.0
+  image: rust:1.85.0
   cache: {}
   script:
     - cargo build --workspace --all-features
