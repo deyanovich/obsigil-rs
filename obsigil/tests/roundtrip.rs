@@ -9,12 +9,12 @@ use obsigil::{
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
-struct Access {
+struct ClauseData {
     role: String,
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
-struct Display {
+struct ClaimData {
     theme: String,
 }
 
@@ -26,7 +26,7 @@ fn issuer() -> Issuer {
 
 fn full_token() -> String {
     issuer()
-        .clauses(&Access {
+        .clauses(&ClauseData {
             role: "admin".into(),
         })
         .exp(4_000_000_000)
@@ -34,7 +34,7 @@ fn full_token() -> String {
         .subject("u42")
         .manifest(
             "auth.example",
-            &Display {
+            &ClaimData {
                 theme: "dark".into(),
             },
         )
@@ -47,7 +47,7 @@ fn full_token_round_trips() {
     let token = full_token();
 
     // Front-end advisory view (keyless).
-    let advisory: Claims<Display> = claims(&token).unwrap();
+    let advisory: Claims<ClaimData> = claims(&token).unwrap();
     assert_eq!(advisory.issuer(), "auth.example");
     assert_eq!(advisory.iss(), "auth.example"); // short alias
     assert_eq!(advisory.app().theme, "dark");
@@ -55,7 +55,7 @@ fn full_token_round_trips() {
     // Backend verification (authoritative).
     let key = MandateKey::from_bytes(KEY_BYTES).unwrap();
     let verifier = Verifier::new().key(&key).audience("api").now(1_000_000_000);
-    let mandate: Clauses<Access> = verifier.clauses(&token).unwrap();
+    let mandate: Clauses<ClauseData> = verifier.clauses(&token).unwrap();
     assert_eq!(mandate.app().role, "admin");
     assert_eq!(mandate.subject(), Some("u42"));
     assert_eq!(mandate.sub(), Some("u42")); // short alias
@@ -73,7 +73,7 @@ fn verifies_the_forwarded_mandate_only_form() {
 
     let key = MandateKey::from_bytes(KEY_BYTES).unwrap();
     let verifier = Verifier::new().key(&key).audience("api").now(1_000_000_000);
-    assert!(verifier.clauses::<Access>(forwarded).is_ok());
+    assert!(verifier.clauses::<ClauseData>(forwarded).is_ok());
 }
 
 #[test]
@@ -85,7 +85,7 @@ fn trial_decryption_accepts_the_matching_key() {
         .keys([&wrong, &right])
         .audience("api")
         .now(1_000_000_000);
-    assert!(verifier.clauses::<Access>(&token).is_ok());
+    assert!(verifier.clauses::<ClauseData>(&token).is_ok());
 }
 
 #[test]
@@ -96,7 +96,7 @@ fn rejects_uniformly_with_internal_reasons() {
 
     // expired
     let v = Verifier::new().key(&key).audience("api").now(4_000_000_001);
-    let e = v.clauses::<Access>(&token).unwrap_err();
+    let e = v.clauses::<ClauseData>(&token).unwrap_err();
     assert_eq!(e.reason(), Reason::Expired);
     assert_eq!(e.to_string(), "obsigil: token rejected"); // uniform Display
 
@@ -106,14 +106,14 @@ fn rejects_uniformly_with_internal_reasons() {
         .audience("other")
         .now(1_000_000_000);
     assert_eq!(
-        v.clauses::<Access>(&token).unwrap_err().reason(),
+        v.clauses::<ClauseData>(&token).unwrap_err().reason(),
         Reason::AudienceMismatch
     );
 
     // aud present but verifier has none
     let v = Verifier::new().key(&key).now(1_000_000_000);
     assert_eq!(
-        v.clauses::<Access>(&token).unwrap_err().reason(),
+        v.clauses::<ClauseData>(&token).unwrap_err().reason(),
         Reason::AudienceMismatch
     );
 
@@ -123,14 +123,14 @@ fn rejects_uniformly_with_internal_reasons() {
         .audience("api")
         .now(1_000_000_000);
     assert_eq!(
-        v.clauses::<Access>(&token).unwrap_err().reason(),
+        v.clauses::<ClauseData>(&token).unwrap_err().reason(),
         Reason::AuthFailed
     );
 
     // malformed
     let v = Verifier::new().key(&key).now(1_000_000_000);
     assert_eq!(
-        v.clauses::<Access>("garbage").unwrap_err().reason(),
+        v.clauses::<ClauseData>("garbage").unwrap_err().reason(),
         Reason::Malformed
     );
 }

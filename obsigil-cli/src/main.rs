@@ -313,12 +313,9 @@ fn cmd_manifest(a: TokenArg) -> Result<ExitCode, String> {
 }
 
 fn cmd_generate_key() -> Result<ExitCode, String> {
-    // The library's `generate_key()` deliberately never exposes its bytes;
-    // the CLI must emit a provisioning key, so it draws the 64 bytes from the
-    // platform CSPRNG directly and hex-encodes them (the mandate construction, §5.1).
-    let mut bytes = [0u8; 64];
-    getrandom::getrandom(&mut bytes).map_err(|e| format!("platform CSPRNG unavailable: {e}"))?;
-    println!("{}", lowlevel::encode(&bytes, Encoding::Hex));
+    // `generate_key()` returns a fresh key as 128 lowercase hex digits (the
+    // Key format, §6.2) — exactly the provisioning form the CLI emits.
+    println!("{}", obsigil::generate_key());
     Ok(ExitCode::SUCCESS)
 }
 
@@ -384,10 +381,13 @@ fn resolve_key(s: &str) -> Result<[u8; 64], String> {
     if s == "manifest" {
         return Ok(obsigil::MANIFEST_KEY);
     }
+    // Keys are canonical lowercase hex (the Key format, §6.2); uppercase is
+    // rejected by the decoder rather than silently lowercased. The `manifest`
+    // and `mandate` keywords resolve to published test keys above.
     let hex = if s == "mandate" {
         MANDATE_TEST_KEY_HEX.to_string()
     } else {
-        s.to_lowercase()
+        s.to_string()
     };
     let bytes =
         lowlevel::decode(&hex, Encoding::Hex).ok_or("--key must be hex or `manifest`/`mandate`")?;

@@ -182,16 +182,16 @@ impl<'a, T: Serialize> MintBuilder<'a, T> {
     /// use serde::{Deserialize, Serialize};
     ///
     /// #[derive(Serialize, Deserialize)]
-    /// struct Ui { theme: String }
+    /// struct ClaimData { theme: String }
     ///
     /// let token = Issuer::new(MandateKey::from_bytes([42u8; 64])?)
     ///     .clauses(&NoApp::default())
     ///     .exp(4_000_000_000)
-    ///     .manifest("auth.example", &Ui { theme: "dark".into() })
+    ///     .manifest("auth.example", &ClaimData { theme: "dark".into() })
     ///     .mint()?;
     ///
     /// // Reads with no secret — advisory only (the non-authoritative-manifest rule of the Security Considerations, §16.7).
-    /// let advisory: Claims<Ui> = claims(&token).expect("present");
+    /// let advisory: Claims<ClaimData> = claims(&token).expect("present");
     /// assert_eq!(advisory.issuer(), "auth.example");
     /// assert_eq!(advisory.app().theme, "dark");
     /// # Ok(()) }

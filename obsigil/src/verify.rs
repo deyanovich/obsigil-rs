@@ -157,15 +157,15 @@ impl<'a> Verifier<'a> {
     /// use serde::{Deserialize, Serialize};
     ///
     /// #[derive(Serialize, Deserialize)]
-    /// struct Access { role: String }
+    /// struct ClauseData { role: String }
     ///
     /// let token = Issuer::new(MandateKey::from_bytes([42u8; 64])?)
-    ///     .clauses(&Access { role: "admin".into() })
+    ///     .clauses(&ClauseData { role: "admin".into() })
     ///     .exp(4_000_000_000)
     ///     .mint()?;
     ///
     /// let key = MandateKey::from_bytes([42u8; 64])?;
-    /// let clauses: Clauses<Access> = Verifier::new()
+    /// let clauses: Clauses<ClauseData> = Verifier::new()
     ///     .key(&key)
     ///     .now(1_000_000_000)
     ///     .clauses(&token)?;
@@ -336,11 +336,11 @@ pub fn claims<T: DeserializeOwned>(token: &str) -> Option<Claims<T>> {
 /// use obsigil::{manifest, Issuer, MandateKey, NoApp};
 /// use serde::{Deserialize, Serialize};
 /// #[derive(Serialize, Deserialize)]
-/// struct Ui { theme: String }
+/// struct ClaimData { theme: String }
 /// let token = Issuer::new(MandateKey::from_bytes([42u8; 64])?)
 ///     .clauses(&NoApp::default())
 ///     .exp(4_000_000_000)
-///     .manifest("auth.example", &Ui { theme: "dark".into() })
+///     .manifest("auth.example", &ClaimData { theme: "dark".into() })
 ///     .mint()?;
 /// let half = manifest(&token).expect("has a manifest half");
 /// assert!(half.ends_with('.')); // trailing-separator manifest-only token

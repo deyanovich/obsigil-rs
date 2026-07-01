@@ -105,6 +105,17 @@ pub enum KeyError {
     IsManifestKey,
     /// The bytes are all zero.
     AllZero,
+    /// A hex key string was not canonical lowercase hexadecimal (the Key
+    /// format, §6.2): an uppercase digit, an odd length, or an out-of-alphabet
+    /// character. A malformed key is a configuration error, kept distinct from
+    /// the verifier's opaque failure — never folded into it.
+    BadHexEncoding,
+    /// A hex key string was canonical hexadecimal but did not decode to
+    /// exactly 64 bytes (the Key format, §6.2).
+    BadHexLength {
+        /// The number of bytes the hex string decoded to.
+        got: usize,
+    },
 }
 
 impl fmt::Display for KeyError {
@@ -114,6 +125,12 @@ impl fmt::Display for KeyError {
                 f.write_str("mandate key must not be the public manifest key")
             }
             KeyError::AllZero => f.write_str("mandate key must not be all zero"),
+            KeyError::BadHexEncoding => {
+                f.write_str("mandate key must be 128 lowercase hexadecimal digits")
+            }
+            KeyError::BadHexLength { got } => {
+                write!(f, "mandate key must decode to 64 bytes, got {got}")
+            }
         }
     }
 }

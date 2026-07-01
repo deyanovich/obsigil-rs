@@ -34,32 +34,33 @@
 //! use serde::{Deserialize, Serialize};
 //!
 //! #[derive(Serialize, Deserialize)]
-//! struct Access { role: String }
+//! struct ClauseData { role: String }
 //! #[derive(Serialize, Deserialize)]
-//! struct Ui { theme: String }
+//! struct ClaimData { theme: String }
 //!
-//! // One 64-byte secret, provisioned to both sides (use
-//! // `generate_key()` in production).
-//! # let _ = generate_key;
-//! let issuer_key = MandateKey::from_bytes([42u8; 64])?;
+//! // One secret key as hex, provisioned to both sides. `generate_key()`
+//! // returns 128 lowercase hex digits (§6.2) to store as a secret (e.g. an
+//! // environment variable); load it with `MandateKey::from_hex`.
+//! let key_hex = generate_key();
+//! let issuer_key = MandateKey::from_hex(&key_hex)?;
 //!
 //! // Issuer: mint a token. The mandate carries the authoritative clauses;
 //! // the optional manifest carries advisory claims.
 //! let token = Issuer::new(issuer_key)
-//!     .clauses(&Access { role: "admin".into() })
+//!     .clauses(&ClauseData { role: "admin".into() })
 //!     .exp(4_000_000_000)
 //!     .audience(["api"])
-//!     .manifest("auth.example", &Ui { theme: "dark".into() })
+//!     .manifest("auth.example", &ClaimData { theme: "dark".into() })
 //!     .mint()?;
 //!
 //! // Front end: read the manifest's claims with no secret (advisory only).
-//! let advisory: Claims<Ui> = claims(&token).expect("present");
+//! let advisory: Claims<ClaimData> = claims(&token).expect("present");
 //! assert_eq!(advisory.issuer(), "auth.example");
 //!
 //! // Backend: verify the mandate's clauses (authoritative). `now` is pinned
 //! // here for a deterministic example; omit it to read the system clock.
-//! let verify_key = MandateKey::from_bytes([42u8; 64])?;
-//! let clauses: Clauses<Access> = Verifier::new()
+//! let verify_key = MandateKey::from_hex(&key_hex)?;
+//! let clauses: Clauses<ClauseData> = Verifier::new()
 //!     .key(&verify_key)
 //!     .audience("api")
 //!     .now(1_000_000_000)

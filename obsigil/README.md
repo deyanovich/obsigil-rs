@@ -57,32 +57,34 @@ use obsigil::{claims, Claims, Clauses, Issuer, MandateKey, Verifier};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
-struct Access { role: String }
+struct ClauseData { role: String }
 
 #[derive(Serialize, Deserialize)]
-struct Display { theme: String }
+struct ClaimData { theme: String }
 
-// A 64-byte secret (e.g. from generate_key()).
-let key = MandateKey::from_bytes([42u8; 64])?;
+// One secret key as hex — `generate_key()` returns 128 lowercase hex
+// digits to store as a secret (e.g. an environment variable).
+let key_hex = obsigil::generate_key();
+let key = MandateKey::from_hex(&key_hex)?;
 
 // Issuer: mint a token. The mandate carries the authoritative
 // clauses; the optional manifest carries advisory claims.
 let token = Issuer::new(key)
-    .clauses(&Access { role: "admin".into() })
+    .clauses(&ClauseData { role: "admin".into() })
     .exp(4_000_000_000)
     .audience(["api"])
     .subject("u42")
-    .manifest("auth.example", &Display { theme: "dark".into() })
+    .manifest("auth.example", &ClaimData { theme: "dark".into() })
     .mint()?;
 
 // Front end: read the manifest's claims, no secret needed (advisory).
-let advisory: Claims<Display> = claims(&token).expect("present");
+let advisory: Claims<ClaimData> = claims(&token).expect("present");
 assert_eq!(advisory.app().theme, "dark");
 
 // Backend: verify the mandate's clauses against a candidate key (or
 // several — trial decryption picks the one that authenticates).
-let key = MandateKey::from_bytes([42u8; 64])?;
-let mandate: Clauses<Access> = Verifier::new()
+let key = MandateKey::from_hex(&key_hex)?;
+let mandate: Clauses<ClauseData> = Verifier::new()
     .key(&key)
     .audience("api")
     .clauses(&token)?;
